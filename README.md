@@ -1,121 +1,42 @@
 # Voxel World
 
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Status: Early Development](https://img.shields.io/badge/status-early%20development-orange.svg)
+![Rust](https://img.shields.io/badge/language-Rust-orange.svg)
+
 **Voxel World** is an open-source, voxel-native game engine focused on large procedural worlds, modular voxel behavior, efficient simulation, and Vulkan rendering.
 
-It is written primarily in **Rust** and is being designed from the ground up around voxels rather than adapting a conventional mesh-oriented engine to support them.
+It is written in **Rust** and designed from the ground up around voxels — not as a terrain system bolted onto a conventional mesh-oriented engine, but as the fundamental structure of the world itself.
 
-This is also very much a passion project.
+> **Status: very early development.** Major architectural decisions are still being explored and almost everything may change. There is no stable public API, no build instructions yet, and no screenshots — those are coming as the renderer and world systems take shape.
 
-I started Voxel World because I wanted an engine where voxels are not treated as a special terrain system bolted onto something else, but as the fundamental structure of the world itself. I am building the engine while learning more about Rust, Vulkan, rendering, data structures, procedural generation, and engine architecture along the way.
+This is also a passion project and a learning process. I'm building the engine while learning Rust, Vulkan, rendering, data structures, procedural generation, and engine architecture along the way. There will be mistakes, experiments, and rewrites — that's part of the project.
 
-That means the project is both an engine and an ongoing learning process. There will be mistakes, experiments, rewrites, and ideas that turn out not to work. That is part of the project.
-
-My hope is that Voxel World eventually becomes useful not only for the games and experiments I want to make, but for anyone else interested in building large, strange, procedural, destructible, or simulation-heavy voxel worlds.
-
-> **Current status:** Very early development.  
-> Major architectural decisions are still being explored and almost everything may change.
-
-## Goals
-
-Voxel World aims to provide a flexible foundation for games and simulations where voxels are a fundamental part of the world rather than an additional terrain feature.
-
-Some of the major goals are:
-
-- Large voxel worlds
-- Procedural world generation
-- Efficient world streaming
-- Hierarchical voxel storage
-- Multiple voxel storage and compression strategies
-- Vulkan-based rendering designed around voxel data
-- Modular voxel properties and behaviors
-- Event-driven simulation where possible
-- Entity Component System architecture
-- Support for creator-defined components and systems
-- Deterministic systems where useful
-- Strong debugging and visualization tools
-
-Not all of these systems exist yet. Some are currently little more than designs, prototypes, or ideas waiting to be tested.
+---
 
 ## Why Voxel-Native?
 
-Voxel World treats voxel data as first-class world state.
+Most engines generate voxel data and then convert it into a conventional scene or object hierarchy. Voxel World instead designs storage, rendering, simulation, spatial queries, and world streaming directly around voxel data as first-class world state.
 
-The engine is not intended to generate a voxel world and then convert it into a conventional scene or object hierarchy. Storage, rendering, simulation, spatial queries, and world streaming are instead being designed around voxel-oriented structures directly.
+Not every region of a world needs the same representation — an empty void, a solid mass, complex terrain, and a simulated machine all have different requirements, so different regions can use different storage strategies.
 
-One important idea behind the project is that not every part of a voxel world needs to be represented in the same way.
+Voxel types themselves are modular: instead of one fixed material definition, a voxel is composed of components (physical phase, density, collision, rendering, simulation behavior, etc.), and creators can define their own. Simulation is opt-in per voxel — most voxels are doing nothing most of the time, and the engine should let them be cheap accordingly.
 
-A huge empty region, a solid mass of material, complicated terrain, and a heavily simulated machine all have very different requirements. The engine should be able to take advantage of that.
+The engine also follows **Entity Component System** principles for dynamic objects (characters, machines, projectiles), sharing conceptual ground with the voxel component model while using different storage internally — a world may hold billions of voxels but only thousands of entities, and treating both the same would waste effort.
 
-Different regions may therefore use different storage representations depending on what they contain and what needs to be done with them.
-
-## Component-Based Voxels
-
-Voxel types are intended to be modular rather than defined by one enormous fixed material structure.
-
-A voxel type might contain components describing things such as:
-
-- Physical phase
-- Mobility
-- Density
-- Collision behavior
-- Rendering properties
-- Interaction properties
-- Simulation behavior
-
-Creators should also be able to define their own components and systems.
-
-Simulation can then be opt-in rather than something every voxel constantly participates in. A voxel might, for example, use components such as:
-
-- `Tick`
-- `RandomTick`
-- Neighbor-change reactions
-- Placement reactions
-- Removal reactions
-
-Most voxels in a world are probably doing absolutely nothing most of the time.
-
-The engine should let them be cheap accordingly.
-
-## Entity Component System
-
-Voxel World is also being designed around Entity Component System principles.
-
-Dynamic objects such as characters, creatures, machines, projectiles, and other entities can be represented through composable components instead of rigid inheritance hierarchies.
-
-Voxel data and ordinary entities may share similar ideas about components and systems while still using very different storage models internally.
-
-A world may contain billions of voxels but only thousands of conventional entities. Treating both exactly the same would make little sense.
+*(Full architectural writeup planned for a `docs/ARCHITECTURE.md` as the design solidifies.)*
 
 ## Rendering
 
-Rendering is a core part of the project and something I want to develop relatively early.
+Voxel World renders directly with **Vulkan**, designed around voxel-specific requirements rather than routed through a general-purpose rendering pipeline. Rendering is being prioritized early, partly because it makes debugging spatial structures, generation, and traversal far easier than reading numbers in a terminal.
 
-Voxel World intends to use **Vulkan** directly so that the renderer can be designed around voxel-specific requirements instead of forcing voxel data through an existing general-purpose rendering architecture.
-
-Rendering is also extremely useful while developing the engine itself.
-
-Being able to actually see what spatial structures, generation systems, traversal algorithms, and storage systems are doing makes debugging considerably easier than staring at numbers in a terminal.
-
-Planned debugging views may eventually include visualization of:
-
-- Voxel hierarchy
-- Loaded world regions
-- Spatial boundaries
-- Level of detail
-- Ray traversal
-- Collision data
-- Active simulation regions
-- Entity positions
+Planned debug visualizations include voxel hierarchy, loaded regions, spatial boundaries, LOD, ray traversal, collision data, active simulation regions, and entity positions.
 
 ## Scope
 
-Voxel World is **not** currently intended to become a complete replacement for general-purpose engines such as Godot, Unity, or Unreal Engine.
+Voxel World is **not** aiming to replace general-purpose engines like Godot, Unity, or Unreal. It won't implement systems just because "engines are supposed to have them" — only features that serve voxel-based games and simulations.
 
-I do not want to implement systems simply because "game engines are supposed to have them."
-
-The project will instead concentrate on features that are useful for voxel-based games and simulations.
-
-Early development is currently focused roughly around:
+Current focus areas, roughly in order:
 
 1. Core spatial and voxel structures
 2. Basic Vulkan rendering
@@ -124,85 +45,48 @@ Early development is currently focused roughly around:
 5. Voxel interaction and simulation
 6. Development and debugging tools
 
-Other systems can be added when there is an actual reason for them to exist.
+## Goals
 
-## Development Status
+- Large voxel worlds with efficient streaming
+- Hierarchical voxel storage with multiple storage/compression strategies
+- Vulkan-based rendering designed around voxel data
+- Modular, creator-extensible voxel components and behaviors
+- Event-driven simulation, deterministic where useful
+- Entity Component System architecture
+- Strong debugging and visualization tools
 
-Voxel World is currently in its earliest stages.
+Not all of these exist yet — some are designs or prototypes waiting to be tested.
 
-There is no stable public API, and there probably will not be one for quite some time.
+## Building from Source
 
-Expect:
-
-- Breaking changes
-- Experiments
-- Bad ideas that get replaced by better ones
-- Architecture being rewritten
-- Incomplete documentation
-- Missing systems
-- Rapid iteration
-
-Backward compatibility is not currently a priority.
-
-At this stage, discovering the right architecture matters much more than preserving the wrong one.
-
-I am also learning parts of the technology stack while building the project, particularly Rust and lower-level engine development. If you find something questionable, inefficient, unidiomatic, or simply wrong, there is a very real possibility that you are right.
-
-Please tell me.
+No build instructions yet — the project is too early for a reliable setup path. This section will be filled in once there's a runnable milestone. In the meantime, cloning the repo and reading through the source is the best way to see where things stand.
 
 ## Contributing
 
-Contributions are extremely welcome.
+Contributions are extremely welcome — code, documentation, architecture critique, benchmarks, bug reports, questions, or just discussion of voxel-engine design.
 
-That includes code, but it is absolutely not limited to code.
+- **Small fixes / docs improvements:** open a pull request directly.
+- **Major features, architectural changes, new dependencies, or large refactors:** open an issue or discussion first. The architecture is moving quickly, and it's better to check for conflicts before investing hours into something.
 
-If you want to:
+I'm learning parts of this stack (especially Rust and lower-level engine work) as I go. If something looks questionable, inefficient, unidiomatic, or wrong — there's a real chance it is. Please tell me.
 
-- Fix something
-- Improve documentation
-- Suggest a better architecture
-- Point out terrible Rust
-- Test something
-- Benchmark something
-- Explain why an idea will explode
-- Propose a feature
-- Build an experiment
-- Ask questions
-- Discuss voxel-engine design
-
-...please do.
-
-This project is meant to be useful to people, and I would much rather build it alongside people who find the subject interesting than pretend I already know every correct answer.
-
-For small fixes and documentation improvements, feel free to open a pull request.
-
-For major features, architectural changes, new dependencies, or large refactors, please open an issue or discussion first. Not because ideas need to pass some grand committee, but because the architecture is changing quickly and it is better to make sure someone is not spending hours implementing something that conflicts with another part of the engine.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details.
 
 ## Project Principles
 
-There are a few principles currently guiding development:
+1. Voxels are first-class world data.
+2. Rendering should adapt to voxel representation, not dictate it.
+3. Large worlds should not require all terrain to stay loaded.
+4. Different voxel data may use different storage representations.
+5. Simulation should avoid unnecessary constant polling.
+6. Extensibility comes through modular components and systems.
+7. The engine stays independent of any particular game.
+8. Features should solve real use cases, not imitate other engines by default.
+9. Experimentation is welcome.
+10. Being wrong and replacing something beats being afraid to try it.
 
-1. **Voxels are first-class world data.**
-2. **Rendering should adapt to voxel representation rather than dictate it.**
-3. **Large worlds should not require all terrain to remain loaded.**
-4. **Different kinds of voxel data may use different storage representations.**
-5. **Simulation should avoid unnecessary constant polling.**
-6. **Extensibility should come through modular components and systems.**
-7. **The engine should remain independent of any particular game.**
-8. **Features should solve real use cases rather than imitate other engines by default.**
-9. **Experimentation is welcome.**
-10. **Being wrong and replacing something is better than being afraid to try it.**
-
-These principles are not commandments. They describe how I currently think the engine should be built, and they may evolve as the project does.
+These aren't commandments — they describe how I currently think the engine should be built, and may evolve with the project.
 
 ## License
 
-Voxel World is licensed under the **MIT License**.
-
-You are free to use, modify, distribute, and build commercial or non-commercial projects with Voxel World under the terms of that license.
-
-If this project eventually helps someone build something interesting, that is exactly what I want it to do.
-
-See [`LICENSE`](LICENSE) for the full license text.
+Voxel World is licensed under the **MIT License**. You're free to use, modify, distribute, and build commercial or non-commercial projects with it. See [`LICENSE`](LICENSE) for the full text.
