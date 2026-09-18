@@ -1,6 +1,19 @@
+use crate::misc::linear::{Vector2, Vector3, Vector4};
+use crate::misc::mixing::{GOLDEN_GAMMA, fold_u128, splitmix64_next};
 use std::f64::consts::{E, PI};
 
 const SQRT_TAU: f64 = 2.506_628_274_631_000_5;
+
+// Distinct odd multipliers, one per 64-bit half of each axis, so that
+// permuting the coordinates of a position cannot produce the same seed.
+const POSITION_MULTIPLIERS: [u64; 6] = [
+    0x9E37_79B9_7F4A_7C15,
+    0xC2B2_AE3D_27D4_EB4F,
+    0x1656_67B1_9E37_79F9,
+    0x27D4_EB2F_1656_67C5,
+    0xFF51_AFD7_ED55_8CCD,
+    0xC4CE_B9FE_1A85_EC53,
+];
 
 #[derive(Clone, Debug)]
 pub struct Random {
@@ -28,26 +41,75 @@ impl Random {
 
         // Collapse the 128-bit seed into a starting 64-bit value.
         // Both halves influence the resulting state.
-        let lower: u64 = seed as u64;
-        let upper: u64 = (seed >> 64) as u64;
-
-        let mut seed_state: u64 =
-            lower ^ upper.rotate_left(32) ^ 0x9E3779B97F4A7C15;
+        let mut seed_state: u64 = fold_u128(seed) ^ GOLDEN_GAMMA;
 
         // SplitMix64 is used here to expand the seed into the
         // four independent state words required by xoshiro256**.
         for index in 0..4 {
-            self.state[index] = Self::splitmix64(&mut seed_state);
+            self.state[index] = splitmix64_next(&mut seed_state);
         }
 
         // xoshiro must never have an entirely zero state.
         if self.state == [0; 4] {
-            self.state[0] = 0x9E3779B97F4A7C15;
+            self.state[0] = GOLDEN_GAMMA;
         }
     }
 
     pub fn seed(&self) -> u128 {
         self.seed
+    }
+
+    /// Builds a new generator for a single voxel position.
+    ///
+    /// The result depends only on this generator's seed and the position, so a
+    /// given world seed always produces the same stream for the same voxel,
+    /// whatever order positions are visited in. This generator's own state is
+    /// left untouched, which is what makes chunk generation order independent.
+    pub fn random_from_position(&self, position: Vector3<i128>) -> Random {
+        Random::new(self.seed_from_position(position))
+    }
+
+    /// As [`Random::random_from_position`], from loose coordinates.
+    pub fn random_from_coordinates(&self, x: i128, y: i128, z: i128) -> Random {
+        Random::new(self.seed_from_coordinates(x, y, z))
+    }
+
+    /// The seed [`Random::random_from_position`] would use, without building
+    /// the generator.
+    pub fn seed_from_position(&self, position: Vector3<i128>) -> u128 {
+        self.seed_from_coordinates(position.x, position.y, position.z)
+    }
+
+    pub fn seed_from_coordinates(&self, x: i128, y: i128, z: i128) -> u128 {
+        // Collapse the 128-bit seed exactly as reseed does, so that both
+        // halves of the world seed reach every position.
+        let mut hash: u64 = fold_u128(self.seed);
+
+        // Every axis contributes both of its 64-bit halves, so the whole
+        // 128-bit coordinate reaches the seed: two positions that differ
+        // only above bit 63 still get unrelated streams.
+        let halves: [u64; 6] = [
+            x as u64,
+            ((x as u128) >> 64) as u64,
+            y as u64,
+            ((y as u128) >> 64) as u64,
+            z as u64,
+            ((z as u128) >> 64) as u64,
+        ];
+
+        // The halves are hashed as a chain rather than XOR-folded together:
+        // a chain cannot cancel itself out when two of them mix to the same
+        // value, and each half gets its own multiplier so that permuting the
+        // coordinates cannot land on the same seed.
+        for (half, multiplier) in halves.into_iter().zip(POSITION_MULTIPLIERS) {
+            hash = splitmix64_next(&mut (hash ^ half.wrapping_mul(multiplier)));
+        }
+
+        // Widen the 64-bit hash to fill the whole 128-bit seed.
+        let low: u64 = splitmix64_next(&mut hash);
+        let high: u64 = splitmix64_next(&mut hash);
+
+        ((high as u128) << 64) | low as u128
     }
 
     pub fn next_bool(&mut self) -> bool {
@@ -99,20 +161,6 @@ impl Random {
         let lower: u128 = self.next_u64() as u128;
 
         (upper << 64) | lower
-    }
-
-    pub fn splitmix64(state: &mut u64) -> u64 {
-        *state = state.wrapping_add(0x9E3779B97F4A7C15);
-
-        let mut value: u64 = *state;
-
-        value = (value ^ (value >> 30))
-            .wrapping_mul(0xBF58476D1CE4E5B9);
-
-        value = (value ^ (value >> 27))
-            .wrapping_mul(0x94D049BB133111EB);
-
-        value ^ (value >> 31)
     }
 
     pub fn nex_i128(&mut self) -> i128 {
@@ -573,6 +621,86 @@ impl Random {
 
         // Only reached through rounding error.
         last_positive
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Directions
+// ---------------------------------------------------------------------------
+
+impl Random {
+    /// A point drawn uniformly from inside the unit disc, with its squared
+    /// radius. Every direction below is built out of one or two of these.
+    ///
+    /// Points are taken from the enclosing square and the corners are thrown
+    /// away, which keeps about pi/4 of them, so this costs a little over 2.5
+    /// draws on average.
+    ///
+    /// The origin is rejected along with the corners, so callers are free to
+    /// divide by the radius. The ones that do not lose a region of measure
+    /// zero by it.
+    fn unit_disc_point(&mut self) -> (f64, f64, f64) {
+        loop {
+            let u: f64 = 2.0 * self.unit_f64() - 1.0;
+            let v: f64 = 2.0 * self.unit_f64() - 1.0;
+
+            let square_radius: f64 = u * u + v * v;
+
+            if square_radius < 1.0 && square_radius != 0.0 {
+                return (u, v, square_radius);
+            }
+        }
+    }
+
+    /// A uniformly distributed direction in the plane: a point on the unit
+    /// circle.
+    ///
+    /// A disc is rotationally symmetric, so pushing a point from it out to the
+    /// rim leaves the angle uniform. Drawing an angle and taking its sine and
+    /// cosine would be shorter, but the trigonometric functions are not
+    /// correctly rounded and may differ between platforms and libm versions,
+    /// and two machines would then disagree about the same seed. Everything
+    /// here is arithmetic and `sqrt`, which IEEE-754 pins to one result.
+    pub fn unit_vector_2d(&mut self) -> Vector2<f64> {
+        let (u, v, square_radius): (f64, f64, f64) = self.unit_disc_point();
+        let scale: f64 = 1.0 / square_radius.sqrt();
+
+        Vector2::new(u * scale, v * scale)
+    }
+
+    /// A uniformly distributed direction: a point on the unit sphere
+    /// (Marsaglia's method, 1972). A disc point lifts to the sphere by way of
+    /// `z = 1 - 2s`, which spreads it over the surface without bunching
+    /// anything at the poles.
+    ///
+    /// Every direction is equally likely. Normalizing a vector drawn from a
+    /// cube would instead bias directions towards the eight corners, which
+    /// shows up as visible structure in gradient noise.
+    pub fn unit_vector_3d(&mut self) -> Vector3<f64> {
+        let (u, v, square_radius): (f64, f64, f64) = self.unit_disc_point();
+        let factor: f64 = 2.0 * (1.0 - square_radius).sqrt();
+
+        Vector3::new(
+            u * factor,
+            v * factor,
+            1.0 - 2.0 * square_radius,
+        )
+    }
+
+    /// A uniformly distributed direction on the unit 3-sphere, by Marsaglia's
+    /// four-dimensional method.
+    ///
+    /// Two disc points are drawn. The first is used as it stands and the second
+    /// is scaled so that the four components come to length 1: the squared norm
+    /// is `s + t * (1 - s) / t`, which is 1 whatever the two radii were.
+    pub fn unit_vector_4d(&mut self) -> Vector4<f64> {
+        let (x, y, first_square_radius): (f64, f64, f64) = self.unit_disc_point();
+        let (z, w, second_square_radius): (f64, f64, f64) = self.unit_disc_point();
+
+        let factor: f64 =
+            ((1.0 - first_square_radius) / second_square_radius).sqrt();
+
+        Vector4::new(x, y, z * factor, w * factor)
     }
 }
 

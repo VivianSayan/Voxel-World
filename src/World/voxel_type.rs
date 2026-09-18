@@ -1,7 +1,7 @@
 use crate::World::voxel_components::VoxelComponent;
 
-struct VoxelType {
-    id: usize,
+pub struct VoxelType {
+    pub id: usize,
     name: String,
     properties: Vec<VoxelComponent>,
 }

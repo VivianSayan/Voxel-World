@@ -1,6 +1,7 @@
 use crate::World::voxel_type::VoxelType;
+use crate::misc::structures::indices::PropertyQuery;
 
-struct VoxelTypeIndex {
+pub struct VoxelTypeIndex {
     voxel_types: Vec<VoxelType>,
 }
 
@@ -11,7 +12,7 @@ impl VoxelTypeIndex {
         }
     }
 
-    pub fn add_voxel_type(&mut self, voxel_type: VoxelType) {
+    pub fn add_voxel_type(&mut self, mut voxel_type: VoxelType) {
         voxel_type.id = self.voxel_types.len() as usize;
         self.voxel_types.push(voxel_type);
     }

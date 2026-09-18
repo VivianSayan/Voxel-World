@@ -1,2 +1,3 @@
 mod World;
-mod Misc;
+#[path = "Misc/mod.rs"]
+pub mod misc;
