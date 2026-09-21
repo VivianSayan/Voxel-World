@@ -28,6 +28,7 @@ const NORMALIZE_4D: f64 = 1.0;
 macro_rules! implement_fractal_noise {
     (
         $name:ident,
+        $at_depth:ident,
         $vector:ident,
         $offsets:ident,
         $gradient:ident,
@@ -41,13 +42,18 @@ macro_rules! implement_fractal_noise {
         /// `tree_depth - d` bits up from there and is `2^(tree_depth - d)`
         /// voxels across.
         ///
-        /// `coarsest_depth` is where the first and heaviest octave sits, and
+        /// `frequency` is the everyday scale control. Each step up halves the
+        /// cell and each step down doubles it, which is a bit shift and nothing
+        /// more, so a higher number packs more detail into the same ground.
+        ///
+        /// The first and heaviest octave sits at the root of one tree, depth
+        /// 0. To pin it to some other octree level instead, use
+        #[doc = concat!("/// [`", stringify!($at_depth), "`].")]
+        ///
         /// `extra_octaves` is how many further levels down to add, so passing 0
-        /// samples `coarsest_depth` on its own. Each level down halves both the
-        /// cell and the amplitude, so the first octave shapes the terrain and
-        /// the rest only add detail. Depth 0 is the root of one tree, and a
-        /// negative `coarsest_depth` keeps doubling from there, giving cells
-        /// that span whole trees for features larger than a single octree.
+        /// samples one octave on its own. Each level down halves both the cell
+        /// and the amplitude, so the first octave shapes the terrain and the
+        /// rest only add detail.
         ///
         /// The result is in `[-1, 1]` whatever the octave count. `tree_depth` is
         /// the floor: nothing deeper is sampled, and the deepest level itself
@@ -55,11 +61,38 @@ macro_rules! implement_fractal_noise {
         /// sample on a lattice corner and gradient noise is zero at every corner
         /// by construction. So `coarsest_depth == tree_depth` returns 0.0, and
         /// asking for more octaves than the tree has left stops early rather
-        /// than summing zeroes.
+        /// than summing zeroes. A `frequency` past the floor returns 0.0 for
+        /// the same reason.
         pub fn $name(
             seed: Seed,
             tree_depth: u8,
+            frequency: i8,
+            extra_octaves: u8,
+            position: $vector<i128>,
+        ) -> f64 {
+            $at_depth(seed, tree_depth, 0, frequency, extra_octaves, position)
+        }
+
+        /// As the shorter form, with the first octave pinned to a named octree
+        /// level rather than to the root.
+        ///
+        /// `coarsest_depth` and `frequency` add together and are
+        /// interchangeable arithmetically: `(4, 0)` samples exactly the field
+        /// `(0, 4)` does. They are separate because they answer different
+        /// questions. `coarsest_depth` says which octree level the field is
+        /// pinned to, which matters when it has to line up with something
+        /// structural; `frequency` says how fine you want it, which is what
+        /// gets adjusted while tuning. Reach for the shorter form and
+        /// `frequency` unless a specific level is the point.
+        ///
+        /// A negative `coarsest_depth` keeps doubling past the root, giving
+        /// cells that span whole trees for features larger than a single
+        /// octree.
+        pub fn $at_depth(
+            seed: Seed,
+            tree_depth: u8,
             coarsest_depth: i8,
+            frequency: i8,
             extra_octaves: u8,
             position: $vector<i128>,
         ) -> f64 {
@@ -67,22 +100,26 @@ macro_rules! implement_fractal_noise {
             // same work it was when this took a bare `u128`.
             let seed: Seed = seed.domain(GRADIENT_DOMAIN);
 
+            // Both shift the lattice by whole powers of two, so the first
+            // octave sits at their sum.
+            let base_depth: i16 = coarsest_depth as i16 + frequency as i16;
+
             let mut total: f64 = 0.0;
             let mut amplitude: f64 = 1.0;
             let mut total_amplitude: f64 = 0.0;
 
             for octave in 0..=extra_octaves {
                 // Depths past what an `i8` holds have no gradients to draw.
-                let depth: i16 = coarsest_depth as i16 + octave as i16;
+                let depth: i16 = base_depth + octave as i16;
                 let shift: i16 = tree_depth as i16 - depth;
 
-                if shift <= 0 || depth > i8::MAX as i16 {
+                if shift <= 0 || depth > i8::MAX as i16 || depth < i8::MIN as i16 {
                     break;
                 }
 
-                // Above the root the cells keep doubling, so a shallow enough
-                // `coarsest_depth` asks for a cell wider than the coordinate
-                // range. An `i128` cannot be shifted further than its own
+                // Above the root the cells keep doubling, so a low enough
+                // `coarsest_depth` or `frequency` asks for a cell wider than
+                // the coordinate range. An `i128` cannot be shifted further than its own
                 // width, and by then one cell already covers everything.
                 let depth: i8 = depth as i8;
                 let shift: u32 = shift.min(i128::BITS as i16 - 1) as u32;
@@ -118,13 +155,16 @@ macro_rules! implement_fractal_noise {
 }
 
 implement_fractal_noise!(
-    get_2d_noise, Vector2, cell_offsets_2d, random_unit_vector_2d, 4, NORMALIZE_2D
+    get_2d_noise, get_2d_noise_at_depth,
+    Vector2, cell_offsets_2d, random_unit_vector_2d, 4, NORMALIZE_2D
 );
 implement_fractal_noise!(
-    get_3d_noise, Vector3, cell_offsets_3d, random_unit_vector_3d, 8, NORMALIZE_3D
+    get_3d_noise, get_3d_noise_at_depth,
+    Vector3, cell_offsets_3d, random_unit_vector_3d, 8, NORMALIZE_3D
 );
 implement_fractal_noise!(
-    get_4d_noise, Vector4, cell_offsets_4d, random_unit_vector_4d, 16, NORMALIZE_4D
+    get_4d_noise, get_4d_noise_at_depth,
+    Vector4, cell_offsets_4d, random_unit_vector_4d, 16, NORMALIZE_4D
 );
 
 /// Splits one hash into two independent values in `[-1, 1]`.
