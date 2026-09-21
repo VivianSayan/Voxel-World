@@ -1,46 +1,110 @@
+//! Noise fields laid out on the octree.
+//!
+//! Every field here shares the same contract, and this module holds the pieces
+//! that make it hold:
+//!
+//! - **Octree aligned.** A sample's cell at depth `d` is
+//!   `position >> (tree_depth - d)`, which is the octree node it falls in.
+//!   Positions arrive at the tree's deepest level, where a node is one voxel.
+//! - **Stateless.** A sample reads hashes of the nodes around it and nothing
+//!   else, so any point evaluates without its neighbours having been
+//!   generated, in any order, from any thread.
+//! - **Consistent between levels of detail.** Everything random is keyed on the
+//!   absolute octree depth, so a node looks the same however a query reaches
+//!   it. A coarse pass and a fine pass agree on the depths they share.
+//! - **Unbounded.** Coordinates are hashed rather than looked up in a
+//!   permutation table, so there is no period to repeat at, and `i128`
+//!   coordinates are carried whole.
+//! - **Reproducible across machines.** Only `+ - * /`, comparison and `sqrt`,
+//!   which IEEE-754 pins to one result. No trigonometry, so no dependence on
+//!   the platform's libm.
+//!
+//! The fields:
+//!
+//! - [`white_noise`]: one independent value per node. No interpolation, so it
+//!   is not continuous; for per-voxel scatter and variant picking.
+//! - [`value_noise`]: random values at the node corners, interpolated. Cheap,
+//!   and unlike gradient noise it is not zero at the corners.
+//! - [`gradient_noise`]: Perlin. Random directions at the node corners, dotted
+//!   against the offset to the sample. Smoother and less axis-aligned than
+//!   value noise, at four times the cost.
+//! - [`cellular`]: one feature point per node, reporting the nearest and the
+//!   node that owns it. For regions, biomes and cell walls.
+//!
+//! Each field mixes its own domain constant into the seed, so that a node's
+//! gradient, its value and its feature point are unrelated draws rather than
+//! three views of one hash.
+
 use crate::misc::linear::{Vector2, Vector3, Vector4};
-use crate::misc::mixing::mix128;
+use crate::misc::seed::Seed;
+
+pub mod cellular;
+pub mod gradient_noise;
+pub mod value_noise;
+pub mod white_noise;
+
+/// Separates the fields from one another. Each is applied to the seed with
+/// [`Seed::domain`] before anything else, so the same node at the same depth
+/// hashes differently for each field.
+pub(crate) const GRADIENT_DOMAIN: u128 = 0x0FC1_9DC6_8B8C_D5B5_2FFD_72DB_D01A_DFB7;
+pub(crate) const VALUE_DOMAIN: u128 = 0x243F_6A88_85A3_08D3_1319_8A2E_0370_7344;
+pub(crate) const WHITE_DOMAIN: u128 = 0x4528_21E6_38D0_1377_BE54_66CF_34E9_0C6C;
+pub(crate) const CELLULAR_DOMAIN: u128 = 0xA076_1D64_78BD_642F_E703_7ED1_A0B4_28DB;
+pub(crate) const CELL_VALUE_DOMAIN: u128 = 0x8EBC_6AF0_9C88_C6E3_5899_65CD_1B3E_9E7F;
 
 /// One odd constant per axis. Giving each input its own multiplier is what
 /// makes the key order-sensitive: a plain `x ^ y ^ z` is commutative and
 /// self-inverse, so `(1, 2, 3)`, `(3, 2, 1)` and `(0, 0, 0)` would all fold to
 /// the same value and the noise would mirror across the diagonals.
-const X_PRIME: u128 = 0x9E37_79B9_7F4A_7C15_F39C_C060_5CED_C835;
-const Y_PRIME: u128 = 0xC2B2_AE3D_27D4_EB4F_1656_67B1_9E37_79F9;
-const Z_PRIME: u128 = 0x27D4_EB2F_1658_67C5_85EB_CA77_C2B2_AE63;
-const W_PRIME: u128 = 0xBF58_476D_1CE4_E5B9_94D0_49BB_1331_11EB;
+pub(crate) const X_PRIME: u128 = 0x9E37_79B9_7F4A_7C15_F39C_C060_5CED_C835;
+pub(crate) const Y_PRIME: u128 = 0xC2B2_AE3D_27D4_EB4F_1656_67B1_9E37_79F9;
+pub(crate) const Z_PRIME: u128 = 0x27D4_EB2F_1658_67C5_85EB_CA77_C2B2_AE63;
+pub(crate) const W_PRIME: u128 = 0xBF58_476D_1CE4_E5B9_94D0_49BB_1331_11EB;
 
 /// Indexed by axis, so a coordinate keeps the same multiplier whatever the
 /// dimension of the lattice it belongs to.
-const AXIS_PRIMES: [u128; 4] = [X_PRIME, Y_PRIME, Z_PRIME, W_PRIME];
+pub(crate) const AXIS_PRIMES: [u128; 4] = [X_PRIME, Y_PRIME, Z_PRIME, W_PRIME];
 
-const LEVEL_PRIME: u128 = 0xFF51_AFD7_ED55_8CCD_D6E8_FEB8_6659_FD93;
-const DIMENSION_PRIME: u128 = 0x2545_F491_4F6C_DD1D_A24B_AA9B_4C6D_E44B;
+pub(crate) const LEVEL_PRIME: u128 = 0xFF51_AFD7_ED55_8CCD_D6E8_FEB8_6659_FD93;
+pub(crate) const DIMENSION_PRIME: u128 = 0x2545_F491_4F6C_DD1D_A24B_AA9B_4C6D_E44B;
 
-fn get_2d_noise(seed: u128, depth: i8, octaves: u8, position: Vector2<i128>) -> f64 {
-    let mut total: f64 = 0.0;
-    for i in 0..octaves {
-        let octave_level: i8 = depth + i as i8;
-        let octave_position: Vector2<i128> = position >> (i as u32);
-        let block_internal_position: Vector2<i128> = position - (octave_position << (i as u32));
-        let relative_position: Vector2<f64> = block_internal_position.map(|x| x as f64 / (1 << i) as f64);
-        let corner_offsets: [Vector2<i128>; 4] = cell_offsets_2d();
+/// Perlin's fade curve, `6t^5 - 15t^4 + 10t^3`.
+///
+/// Interpolating the corners straight would leave the value continuous but not
+/// its slope, and the crease along every cell boundary is plainly visible as a
+/// grid in the terrain. This curve is flat to the second derivative at both
+/// ends, so the cells meet smoothly and the grid disappears.
+#[inline]
+pub(crate) fn fade(t: f64) -> f64 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
 
-        let mut corner_values: [f64; 4] = [0.0; 4];
-        for j in 0..4 {
-            let corner_position: Vector2<i128> = octave_position + corner_offsets[j];
-            let gradient: Vector2<f64> = random_unit_vector_2d(seed, octave_level + depth, corner_position);
-            let distance: Vector2<f64> = relative_position - corner_offsets[j].map(|x| x as f64);
-            let contribution: f64 = gradient.dot(distance);
-            corner_values[j] = contribution;
+#[inline]
+pub(crate) fn lerp(from: f64, to: f64, t: f64) -> f64 {
+    from + (to - from) * t
+}
+
+/// Collapses the corner values of one cell down to a single sample.
+///
+/// Two corners whose indices differ only in bit `d` are the ends of an edge
+/// along axis `d`, and `cell_offsets_*` lays them out so that those two are
+/// adjacent once the lower axes are gone. Each pass therefore interpolates
+/// neighbouring entries, drops the low bit of the index and halves the array,
+/// which walks the axes in order and needs the weights in the same order.
+pub(crate) fn interpolate(corners: &mut [f64], weights: &[f64]) -> f64 {
+    let mut remaining: usize = corners.len();
+
+    for &weight in weights {
+        remaining /= 2;
+
+        // Reading ahead of where it writes, so the source values are always
+        // still the previous pass's.
+        for i in 0..remaining {
+            corners[i] = lerp(corners[2 * i], corners[2 * i + 1], weight);
         }
-
-        // The amplitude of each octave is halved, so the sum converges to a
-        // finite value. The first octave is full strength, and the second is
-        // half that, and the third is half of that again, and so on.
-        //total += octave_contribution * 0.5_f64.powi(i as i32);
     }
-    total
+
+    corners[0]
 }
 
 /// Combines a seed, an octree level and a lattice position into one key for
@@ -67,10 +131,15 @@ fn get_2d_noise(seed: u128, depth: i8, octaves: u8, position: Vector2<i128>) -> 
 /// The casts to `u128` reinterpret the two's-complement bits rather than
 /// saturating, so they are bijective and lose nothing.
 #[inline]
-fn position_hash<const N: usize>(seed: u128, level: i8, position: [i128; N]) -> u128 {
+pub(crate) fn position_hash<const N: usize>(
+    seed: Seed,
+    level: i8,
+    position: [i128; N],
+) -> u128 {
     const { assert!(N <= AXIS_PRIMES.len(), "no multiplier for that many axes") };
 
     let mut key: u128 = seed
+        .value()
         .wrapping_add((level as i128 as u128).wrapping_mul(LEVEL_PRIME))
         .wrapping_add((N as u128).wrapping_mul(DIMENSION_PRIME));
 
@@ -84,95 +153,6 @@ fn position_hash<const N: usize>(seed: u128, level: i8, position: [i128; N]) -> 
     }
 
     key
-}
-
-/// Splits one hash into two independent values in `[-1, 1]`.
-#[inline]
-fn signed_pair(hash: u128) -> (f64, f64) {
-    let high: u64 = (hash >> 64) as u64;
-    let low: u64 = hash as u64;
-
-    (
-        low as f64 / (u64::MAX as f64) * 2.0 - 1.0,
-        high as f64 / (u64::MAX as f64) * 2.0 - 1.0,
-    )
-}
-
-/// Draws a point uniformly inside the unit disc and returns it with its squared
-/// radius. Points are taken from the enclosing square and the corners are
-/// thrown away, which keeps about pi/4 of them, so this reads 1.27 hashes per
-/// call on average.
-///
-/// `hash` is advanced past everything the draw consumed, so a second call
-/// continues the stream rather than repeating it.
-///
-/// The origin is rejected along with the corners. Callers that divide by the
-/// radius need that, and the ones that do not lose a region of measure zero.
-#[inline]
-fn unit_disc_point(hash: &mut u128) -> (f64, f64, f64) {
-    loop {
-        *hash = mix128(*hash);
-
-        let (u, v): (f64, f64) = signed_pair(*hash);
-        let squared_radius: f64 = u * u + v * v;
-
-        if squared_radius < 1.0 && squared_radius != 0.0 {
-            return (u, v, squared_radius);
-        }
-    }
-}
-
-/// A direction on the unit circle, drawn from the seed, the level and the
-/// lattice point alone.
-///
-/// The obvious way to write this is to draw an angle and take its sine and
-/// cosine. That is avoided on purpose: the trigonometric functions are not
-/// correctly rounded, so they may differ between platforms and between libm
-/// versions, and a world would then generate differently on two machines from
-/// the same seed. Everything here is addition, multiplication, division and
-/// `sqrt`, all of which IEEE-754 pins to a single result.
-fn random_unit_vector_2d(seed: u128, level: i8, position: Vector2<i128>) -> Vector2<f64> {
-    let mut hash: u128 = position_hash(seed, level, position.to_array());
-
-    // A disc is rotationally symmetric, so pushing a point out to the rim
-    // leaves the angle uniform.
-    let (u, v, squared_radius): (f64, f64, f64) = unit_disc_point(&mut hash);
-    let scale: f64 = 1.0 / squared_radius.sqrt();
-
-    Vector2::new(u * scale, v * scale)
-}
-
-/// A direction on the unit sphere, by Marsaglia's method: a point from the unit
-/// disc lifts to the sphere by way of `z = 1 - 2s`, which spreads the disc over
-/// the surface without bunching anything at the poles.
-fn random_unit_vector_3d(seed: u128, level: i8, position: Vector3<i128>) -> Vector3<f64> {
-    let mut hash: u128 = position_hash(seed, level, position.to_array());
-
-    let (u, v, squared_radius): (f64, f64, f64) = unit_disc_point(&mut hash);
-    let factor: f64 = 2.0 * (1.0 - squared_radius).sqrt();
-
-    Vector3::new(
-        u * factor,
-        v * factor,
-        1.0 - 2.0 * squared_radius,
-    )
-}
-
-/// A direction on the unit 3-sphere, by Marsaglia's four-dimensional method.
-///
-/// Two disc points are drawn. The first is used as it stands, and the second is
-/// scaled so that the four components together come to length 1: the squared
-/// norm is `s + t * (1 - s) / t`, which is 1 whatever the two radii were.
-fn random_unit_vector_4d(seed: u128, level: i8, position: Vector4<i128>) -> Vector4<f64> {
-    let mut hash: u128 = position_hash(seed, level, position.to_array());
-
-    let (x, y, first_squared_radius): (f64, f64, f64) = unit_disc_point(&mut hash);
-    let (z, w, second_squared_radius): (f64, f64, f64) = unit_disc_point(&mut hash);
-
-    let factor: f64 =
-        ((1.0 - first_squared_radius) / second_squared_radius).sqrt();
-
-    Vector4::new(x, y, z * factor, w * factor)
 }
 
 // ---------------------------------------------------------------------------

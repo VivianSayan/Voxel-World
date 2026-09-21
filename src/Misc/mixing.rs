@@ -66,3 +66,54 @@ pub fn mix128(value: u128) -> u128 {
 
     ((high_out as u128) << 64) | low_out as u128
 }
+
+// ---------------------------------------------------------------------------
+// Absorption
+// ---------------------------------------------------------------------------
+
+/// Initial state for `hash_bytes`. Any odd constant does; this one is the
+/// fractional part of pi scaled to 128 bits.
+const BYTES_INITIAL: u128 = 0x243F_6A88_85A3_08D3_1319_8A2E_0370_7344;
+
+/// Folds one 128-bit input into a running state.
+///
+/// Bijective in `input` for any fixed state, so two different inputs can never
+/// meet at the same point of a stream. Chaining this is how a value longer than
+/// 128 bits is reduced without letting earlier parts cancel later ones, which
+/// is what a plain xor-fold would allow.
+#[inline]
+pub fn absorb128(state: u128, input: u128) -> u128 {
+    mix128(state ^ input)
+}
+
+/// Widens a 64-bit value into a well-spread 128-bit one, so that a small or
+/// structured number still reaches every bit of a seed.
+#[inline]
+pub fn expand_u64(value: u64) -> u128 {
+    mix128(value as u128)
+}
+
+/// Hashes a byte string to 128 bits.
+///
+/// The length is absorbed at the end as well as the bytes, so that inputs
+/// differing only in trailing zero bytes, or one being a prefix of another, do
+/// not collide. Bytes are read little-endian explicitly rather than through a
+/// transmute, so the result is the same on every target.
+pub fn hash_bytes(bytes: &[u8]) -> u128 {
+    let mut state: u128 = BYTES_INITIAL;
+
+    let (chunks, remainder) = bytes.as_chunks::<16>();
+
+    for chunk in chunks {
+        state = absorb128(state, u128::from_le_bytes(*chunk));
+    }
+
+    // The tail is zero-padded to a full block; the length absorbed after it is
+    // what keeps that padding from being ambiguous.
+    let mut tail: [u8; 16] = [0; 16];
+    tail[..remainder.len()].copy_from_slice(remainder);
+
+    state = absorb128(state, u128::from_le_bytes(tail));
+
+    absorb128(state, bytes.len() as u128)
+}

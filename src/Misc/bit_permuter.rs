@@ -9,6 +9,7 @@
 //! All arithmetic is done modulo `2^bits`, which is why the values are
 //! `u128`: wrapping unsigned arithmetic is exactly that ring.
 
+use crate::misc::seed::Seed;
 use crate::misc::mixing::mix128;
 
 const NR_BITS_BYTES: usize = 1;
@@ -73,6 +74,16 @@ impl BitPermuter {
     /// A permuter with step 1 and offset 0.
     pub fn with_seed(bits: u32, seed: u128) -> Self {
         Self::new(bits, seed, 1, 0)
+    }
+
+    /// A permuter keyed from a derived [`Seed`].
+    ///
+    /// The key here is not a world seed and is not stored as one: it is masked
+    /// to `bits` and xor-ed into values, so most of a 128-bit seed is thrown
+    /// away by a narrow permuter. This takes a `Seed` for convenience at the
+    /// call site, and what survives is whatever fits.
+    pub fn from_seed(bits: u32, seed: Seed) -> Self {
+        Self::with_seed(bits, seed.value())
     }
 
     pub fn bits(&self) -> u32 {

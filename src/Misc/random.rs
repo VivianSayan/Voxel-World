@@ -1,30 +1,20 @@
 use crate::misc::linear::{Vector2, Vector3, Vector4};
 use crate::misc::mixing::{GOLDEN_GAMMA, fold_u128, splitmix64_next};
+use crate::misc::seed::Seed;
 use std::f64::consts::{E, PI};
 
 const SQRT_TAU: f64 = 2.506_628_274_631_000_5;
 
-// Distinct odd multipliers, one per 64-bit half of each axis, so that
-// permuting the coordinates of a position cannot produce the same seed.
-const POSITION_MULTIPLIERS: [u64; 6] = [
-    0x9E37_79B9_7F4A_7C15,
-    0xC2B2_AE3D_27D4_EB4F,
-    0x1656_67B1_9E37_79F9,
-    0x27D4_EB2F_1656_67C5,
-    0xFF51_AFD7_ED55_8CCD,
-    0xC4CE_B9FE_1A85_EC53,
-];
-
 #[derive(Clone, Debug)]
 pub struct Random {
-    seed: u128,
+    seed: Seed,
     state: [u64; 4],
     // Normal samples are generated in pairs; the second one is kept here.
     spare_normal: Option<f64>,
 }
 
 impl Random {
-    pub fn new(seed: u128) -> Self {
+    pub fn new(seed: Seed) -> Self {
         let mut random = Self {
             seed,
             state: [0; 4],
@@ -35,13 +25,13 @@ impl Random {
         random
     }
 
-    pub fn reseed(&mut self, seed: u128) {
+    pub fn reseed(&mut self, seed: Seed) {
         self.seed = seed;
         self.spare_normal = None;
 
         // Collapse the 128-bit seed into a starting 64-bit value.
         // Both halves influence the resulting state.
-        let mut seed_state: u64 = fold_u128(seed) ^ GOLDEN_GAMMA;
+        let mut seed_state: u64 = fold_u128(seed.value()) ^ GOLDEN_GAMMA;
 
         // SplitMix64 is used here to expand the seed into the
         // four independent state words required by xoshiro256**.
@@ -55,7 +45,7 @@ impl Random {
         }
     }
 
-    pub fn seed(&self) -> u128 {
+    pub fn seed(&self) -> Seed {
         self.seed
     }
 
@@ -76,40 +66,17 @@ impl Random {
 
     /// The seed [`Random::random_from_position`] would use, without building
     /// the generator.
-    pub fn seed_from_position(&self, position: Vector3<i128>) -> u128 {
-        self.seed_from_coordinates(position.x, position.y, position.z)
+    pub fn seed_from_position(&self, position: Vector3<i128>) -> Seed {
+        self.seed.at(position.to_array())
     }
 
-    pub fn seed_from_coordinates(&self, x: i128, y: i128, z: i128) -> u128 {
-        // Collapse the 128-bit seed exactly as reseed does, so that both
-        // halves of the world seed reach every position.
-        let mut hash: u64 = fold_u128(self.seed);
-
-        // Every axis contributes both of its 64-bit halves, so the whole
-        // 128-bit coordinate reaches the seed: two positions that differ
-        // only above bit 63 still get unrelated streams.
-        let halves: [u64; 6] = [
-            x as u64,
-            ((x as u128) >> 64) as u64,
-            y as u64,
-            ((y as u128) >> 64) as u64,
-            z as u64,
-            ((z as u128) >> 64) as u64,
-        ];
-
-        // The halves are hashed as a chain rather than XOR-folded together:
-        // a chain cannot cancel itself out when two of them mix to the same
-        // value, and each half gets its own multiplier so that permuting the
-        // coordinates cannot land on the same seed.
-        for (half, multiplier) in halves.into_iter().zip(POSITION_MULTIPLIERS) {
-            hash = splitmix64_next(&mut (hash ^ half.wrapping_mul(multiplier)));
-        }
-
-        // Widen the 64-bit hash to fill the whole 128-bit seed.
-        let low: u64 = splitmix64_next(&mut hash);
-        let high: u64 = splitmix64_next(&mut hash);
-
-        ((high as u128) << 64) | low as u128
+    /// As [`Random::seed_from_position`], from loose coordinates.
+    ///
+    /// Both defer to [`Seed::at`], so a position seeded through a generator and
+    /// one seeded straight from a [`Seed`] agree, and there is only one place
+    /// that decides how a coordinate reaches a seed.
+    pub fn seed_from_coordinates(&self, x: i128, y: i128, z: i128) -> Seed {
+        self.seed.at([x, y, z])
     }
 
     pub fn next_bool(&mut self) -> bool {
