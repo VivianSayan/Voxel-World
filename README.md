@@ -1,4 +1,5 @@
 # Voxel World
+
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status: Early Development](https://img.shields.io/badge/status-early%20development-orange.svg)
 ![Rust](https://img.shields.io/badge/language-Rust-orange.svg)
