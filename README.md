@@ -1,8 +1,8 @@
 # Voxel World
-
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status: Early Development](https://img.shields.io/badge/status-early%20development-orange.svg)
 ![Rust](https://img.shields.io/badge/language-Rust-orange.svg)
+
 **Voxel World** is an open-source voxel game engine written in Rust.
 The main idea is to build the engine around voxels from the beginning, rather than treating them as terrain that eventually gets converted into a more conventional scene or mesh system.
 The long-term goal is to support large procedural worlds, modular voxel behaviour, efficient simulation, and Vulkan-based rendering.
