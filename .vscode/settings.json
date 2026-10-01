@@ -1,0 +1,14 @@
+{
+  // GLSL is what Vulkan shaders are written in before `glslc` turns them into
+  // the SPIR-V that Vulkan actually consumes. The `slevesque.shader` extension
+  // colours these; the associations below cover the extensions it misses.
+  "files.associations": {
+    "*.vert": "glsl",
+    "*.frag": "glsl",
+    "*.comp": "glsl",
+    "*.geom": "glsl",
+    "*.tesc": "glsl",
+    "*.tese": "glsl",
+    "*.glsl": "glsl"
+  }
+}

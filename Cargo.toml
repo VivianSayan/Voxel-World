@@ -3,4 +3,141 @@ name = "voxel-world"
 version = "0.1.0"
 edition = "2024"
 
+# Tests and benchmarks live together under `testing/` rather than in Cargo's
+# default `tests/` and `benches/`, so each one is declared below. Turning the
+# automatic discovery off means a stray `tests/` folder can never be picked up
+# as well.
+autotests = false
+autobenches = false
+
 [dependencies]
+# Operating-system entropy for worlds that were not given a seed.
+getrandom = "0.3.4"
+
+# The window and Vulkan, used only by the binary in `src/main.rs`; the library
+# itself calls none of them.
+ash = "0.38"
+ash-window = "0.13"
+raw-window-handle = "0.6"
+winit = "0.30"
+
+[[test]]
+name = "sampling"
+path = "testing/tests/sampling.rs"
+
+[[test]]
+name = "exact_sampling"
+path = "testing/tests/exact_sampling.rs"
+
+[[test]]
+name = "rota"
+path = "testing/tests/rota.rs"
+
+[[test]]
+name = "condition_index"
+path = "testing/tests/condition_index.rs"
+
+[[test]]
+name = "ecs_systems"
+path = "testing/tests/ecs_systems.rs"
+
+[[test]]
+name = "matrix"
+path = "testing/tests/matrix.rs"
+
+[[test]]
+name = "interval"
+path = "testing/tests/interval.rs"
+
+[[test]]
+name = "split_algebras"
+path = "testing/tests/split_algebras.rs"
+
+[[test]]
+name = "polynomial"
+path = "testing/tests/polynomial.rs"
+
+[[test]]
+name = "modular"
+path = "testing/tests/modular.rs"
+
+[[test]]
+name = "quadratic"
+path = "testing/tests/quadratic.rs"
+
+[[test]]
+name = "octree"
+path = "testing/tests/octree.rs"
+
+[[test]]
+name = "name"
+path = "testing/tests/name.rs"
+
+[[test]]
+name = "gate"
+path = "testing/tests/gate.rs"
+
+[[test]]
+name = "layered_map"
+path = "testing/tests/layered_map.rs"
+
+[[test]]
+name = "stochastic_scheduler"
+path = "testing/tests/stochastic_scheduler.rs"
+
+[[test]]
+name = "structures_additions"
+path = "testing/tests/structures_additions.rs"
+
+[[test]]
+name = "value_invariants"
+path = "testing/tests/value_invariants.rs"
+
+[[test]]
+name = "world"
+path = "testing/tests/world.rs"
+
+[[bench]]
+name = "sampling"
+path = "testing/benches/sampling.rs"
+harness = false
+
+[[test]]
+name = "wide_integer"
+path = "testing/tests/wide_integer.rs"
+
+[[test]]
+name = "fixed_wide"
+path = "testing/tests/fixed_wide.rs"
+
+[[test]]
+name = "wide_float"
+path = "testing/tests/wide_float.rs"
+
+[[test]]
+name = "big_integer"
+path = "testing/tests/big_integer.rs"
+
+[[test]]
+name = "big_float"
+path = "testing/tests/big_float.rs"
+
+[[test]]
+name = "unit_interval"
+path = "testing/tests/unit_interval.rs"
+
+[[test]]
+name = "bulk_sampling"
+path = "testing/tests/bulk_sampling.rs"
+
+[[test]]
+name = "fixed"
+path = "testing/tests/fixed.rs"
+
+[[test]]
+name = "seed_derivation"
+path = "testing/tests/seed_derivation.rs"
+
+[[test]]
+name = "fixed_trigonometry"
+path = "testing/tests/fixed_trigonometry.rs"

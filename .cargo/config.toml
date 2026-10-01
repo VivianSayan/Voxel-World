@@ -1,0 +1,6 @@
+# Vulkan on macOS runs through MoltenVK, which the loader finds only when it is
+# told where the driver description lives. Homebrew puts it here; the LunarG SDK
+# would put it under ~/VulkanSDK instead.
+[env]
+VK_ICD_FILENAMES = "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json"
+DYLD_LIBRARY_PATH = "/opt/homebrew/opt/vulkan-loader/lib:/opt/homebrew/opt/molten-vk/lib"

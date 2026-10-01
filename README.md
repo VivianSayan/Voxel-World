@@ -122,6 +122,21 @@ Expect:
 
 Backward compatibility is not currently guaranteed.
 
+## Working Foundations
+
+The library currently includes typed spatial and time quantities, random streams
+and distributions, noise, generic collections, voxel registration and a minimal
+chunk generator. Run the connected registration → generation → query example:
+
+```sh
+cargo run
+```
+
+See [architecture and API migration notes](docs/architecture.md) for the module
+layout, type-safety changes, determinism limits, tests and sampling benchmarks.
+See the [structure reference](docs/structures.md) for a problem-oriented guide
+to every reusable collection, mapping, index and storage structure.
+
 ## Contributing
 
 Contributions, ideas, testing, and discussion are welcome.
@@ -130,7 +145,8 @@ For small fixes and documentation improvements, feel free to open a pull request
 
 For major features, architectural changes, new dependencies, or large refactors, please open an issue or discussion first so the direction can be agreed upon before significant work is done.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+Before submitting changes, run the checks listed in the
+[development notes](docs/architecture.md#connected-example-and-checks).
 
 ## Project Principles
 

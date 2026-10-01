@@ -1,9 +1,13 @@
+//! What a voxel type is made of, beyond its name.
+//!
+//! A placeholder so far: the tree below sketches the components a type will
+//! carry, grouped by what reads them.
+
+/// One property attached to a voxel type. Not yet implemented.
 pub struct VoxelComponent {}
 
-trait Component {
-    
-}
-
+/// What every voxel component will implement. Not yet implemented.
+pub trait Component {}
 
 // Voxel Archetype
 // ├── Visual

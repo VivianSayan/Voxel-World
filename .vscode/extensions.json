@@ -1,0 +1,6 @@
+{
+  "recommendations": [
+    "slevesque.shader",
+    "rust-lang.rust-analyzer"
+  ]
+}
