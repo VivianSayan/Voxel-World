@@ -2,7 +2,7 @@
 //! kept both inside each group and across the rota as a whole.
 
 use super::balance::Balance;
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{
@@ -294,12 +294,12 @@ impl<T: Element, const GROUPS: usize> UniqueCollection for OrderedRota<T, GROUPS
 
 /// Uniform over the elements held, in the order they were added.
 impl<T: Element, const GROUPS: usize> Choose for OrderedRota<T, GROUPS> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.is_empty() {
             return None;
         }
 
-        self.iter().nth(random.uniform_index(self.balance.len()))
+        self.iter().nth(source.index_below(self.balance.len()))
     }
 }
 

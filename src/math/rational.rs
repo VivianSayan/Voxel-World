@@ -75,6 +75,57 @@ impl Ratio {
     /// Reducing here rather than on use is what keeps later arithmetic inside
     /// 64 bits for as long as possible, and what makes equality mean equal
     /// value rather than equal spelling.
+    /// Reads decimal notation as the exact fraction it denotes.
+    ///
+    /// # Question
+    ///
+    /// "What fraction does this decimal number *actually* name?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use voxel_world::math::Ratio;
+    ///
+    /// // Exact, because a decimal is a rational: no rounding happens at all.
+    /// let eighth = Ratio::from_decimal_str("0.125").unwrap();
+    ///
+    /// assert_eq!(eighth, Ratio::new(1, 8).unwrap());
+    /// assert_eq!(Ratio::from_decimal_str("0.1").unwrap(), Ratio::new(1, 10).unwrap());
+    /// assert_eq!(Ratio::from_decimal_str("2.5e-1").unwrap(), Ratio::new(1, 4).unwrap());
+    /// ```
+    ///
+    /// # Why this one loses nothing
+    ///
+    /// [`Fixed`](crate::math::Fixed) and [`Unit`](crate::math::Unit) have to round a
+    /// decimal onto a binary grid, because `1/10` is not a dyadic rational. A
+    /// [`Ratio`] has no such grid: `0.1` is stored as `1/10` and stays that way.
+    /// Where a decimal constant has to be kept exactly, this is the type that can.
+    ///
+    /// `None` for a negative value, which this type cannot hold, and for a numerator
+    /// or denominator too large for a `u64`.
+    pub fn from_decimal_str(text: &str) -> Option<Self> {
+        let decimal = crate::math::decimal::parse(text).ok()?;
+
+        if decimal.is_negative() {
+            return None;
+        }
+
+        let significand: u64 = u64::try_from(decimal.significand()).ok()?;
+        let exponent: i32 = decimal.exponent();
+
+        let mut scale: u64 = 1u64;
+
+        for _ in 0..exponent.unsigned_abs() {
+            scale = scale.checked_mul(10)?;
+        }
+
+        if exponent >= 0 {
+            Self::new(significand.checked_mul(scale)?, 1)
+        } else {
+            Self::new(significand, scale)
+        }
+    }
+
     pub fn new(numerator: u64, denominator: u64) -> Option<Self> {
         if denominator == 0 {
             return None;

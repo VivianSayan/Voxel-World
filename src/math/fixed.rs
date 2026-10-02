@@ -52,9 +52,21 @@
 //! output bit at a time by squaring, and an exponential by splitting the
 //! argument on `ln 2` and summing a short series. Both work internally with 96
 //! fractional bits, so the guard bits absorb the rounding and the result lands
-//! within a step of the answer: the logarithms are good to one step, the
-//! exponentials are correctly rounded, and the two powers to about one part in
-//! `10^10`.
+//! close to the answer. Measured against an independent high-precision
+//! evaluation, over every supported width:
+//!
+//! | | worst error, result at most one | larger results |
+//! |---|---|---|
+//! | `exp`, `exp2`, `log2` | half a step | grows with the result |
+//! | `ln`, `log10`, `sqrt` | one step | one step |
+//! | `pow` | half a step | about one part in `10^10` |
+//!
+//! The qualification matters for the exponentials. A fixed-point step is a fixed
+//! *absolute* size, so a large result is a large number of steps, and an
+//! algorithm with bounded relative error necessarily spans more of them: `exp`
+//! at 64 fractional bits was 100 steps out at a result near `7e10`, which is a
+//! relative error below `2^-93`. That is not a defect, but it is not "correctly
+//! rounded" either, and this file used to say it was.
 //!
 //! They are not a replacement for an `f64` libm, and specifically not for the
 //! samplers in [`crate::random::distributions`]. Ten significant digits is
@@ -72,6 +84,7 @@ use std::ops::{
 use std::str::FromStr;
 
 use crate::math::cordic;
+use crate::math::decimal;
 
 /// How many bits of a [`Fixed`] lie after the point.
 ///
@@ -206,6 +219,32 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// layout: its own width plus a guard.
     const LOG_BITS: u32 = FRACTION_BITS + LOG_GUARD_BITS;
 
+    /// `ln 2` as `LN_2_NUMERATOR / 2^16`, rounded **up** so it over-estimates.
+    ///
+    /// The exponential limits below are derived from it, and they are only sound if
+    /// the approximation errs on the generous side: an over-estimate of `ln 2` makes
+    /// the admitted domain slightly too wide, which the exact arithmetic downstream
+    /// then rejects, where an under-estimate would reject values that do fit.
+    const LN_2_NUMERATOR: i128 = 45_427;
+
+    /// The whole part of an exponent at or above which `2^x` cannot fit.
+    ///
+    /// The largest value is just under `2^(127 - FRACTION_BITS)`, so that exponent
+    /// is already out of range. Derived from the layout, not chosen.
+    const EXP2_TOO_LARGE: i128 = 127 - FRACTION_BITS as i128;
+
+    /// The whole part of an exponent below which `2^x` rounds to zero.
+    ///
+    /// Half a step is `2^-(FRACTION_BITS + 1)`, and anything under that is nearer
+    /// zero than to the smallest positive value.
+    const EXP2_UNDERFLOWS: i128 = -(FRACTION_BITS as i128) - 1;
+
+    /// The whole part of an exponent above which `e^x` cannot fit.
+    const EXP_TOO_LARGE: i128 = (Self::EXP2_TOO_LARGE * Self::LN_2_NUMERATOR) >> 16;
+
+    /// The whole part of an exponent below which `e^x` rounds to zero.
+    const EXP_UNDERFLOWS: i128 = -(((FRACTION_BITS as i128 + 1) * Self::LN_2_NUMERATOR) >> 16) - 1;
+
     /// Refuses a width the transcendental functions could not hold their accuracy
     /// at, and a width of zero, which has no fraction to be fixed.
     const VALID: () = assert!(
@@ -263,9 +302,7 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// Rounds to nearest. Every reference here is positive, so adding half a step
     /// before shifting is the whole of it.
     const fn from_reference(reference: i128) -> Self {
-        let shift: u32 = REFERENCE_BITS - FRACTION_BITS;
-
-        Self((reference + (1 << (shift - 1))) >> shift)
+        Self(round_shift(reference, REFERENCE_BITS - FRACTION_BITS))
     }
 }
 
@@ -274,7 +311,7 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
 // ---------------------------------------------------------------------------
 
 impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
-    /// The value whose raw count of `2^-32` is `bits`.
+    /// The value whose raw count of `2^-FRACTION_BITS` is `bits`.
     ///
     /// The inverse of [`Fixed::to_bits`], and the way to read one back from
     /// storage: the raw count is the whole representation, so it round-trips
@@ -287,7 +324,7 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
         Self(bits)
     }
 
-    /// The raw count of `2^-32` underneath, for storing or hashing.
+    /// The raw count of `2^-FRACTION_BITS` underneath, for storing or hashing.
     pub const fn to_bits(self) -> i128 {
         self.0
     }
@@ -319,13 +356,29 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
         Some(Self(wide::apply_sign(magnitude, sign)?))
     }
 
-    /// The nearest value at or below `value`, or `None` if it is not finite or
-    /// lies outside the range.
+    /// The value obtained by **truncating towards zero**, or `None` if the input is
+    /// not finite or lies outside the range.
     ///
-    /// Scaling by `2^32` only changes an `f64`'s exponent, so nothing is lost
-    /// before the truncation, and the cast that follows truncates towards zero
-    /// by a rule Rust pins down. The conversion is therefore as reproducible as
-    /// the rest of the type.
+    /// Towards zero, not downwards: `1.9` gives `1.9` cut down to the grid, and
+    /// `-1.9` gives `-1.9` cut *up* towards zero. The two directions are not the
+    /// same, and this is not a floor.
+    ///
+    /// Scaling by `2^FRACTION_BITS` only changes an `f64`'s exponent, so nothing is
+    /// lost before the truncation, and the cast that follows truncates towards zero
+    /// by a rule Rust pins down. The conversion is therefore as reproducible as the
+    /// rest of the type.
+    ///
+    /// # When to use this, and when not to
+    ///
+    /// This answers "I already hold a binary floating-point number — convert it",
+    /// which is the right question for a sensor reading, a parsed configuration value
+    /// or anything arriving from a float API.
+    ///
+    /// It is the wrong question for a constant written in source. By the time this
+    /// method sees `0.1`, the compiler has already replaced it with the nearest
+    /// `f64`, and the original decimal cannot be recovered. Use
+    /// [`fixed!`](crate::fixed) for that: it reads the decimal text itself and never
+    /// involves a float at all.
     pub fn from_f64(value: f64) -> Option<Self> {
         if !value.is_finite() {
             return None;
@@ -342,15 +395,30 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
 
     /// The nearest `f64`, for rendering, printing or handing to a sampler.
     ///
-    /// Exact while the value needs no more than 53 significant bits, which
-    /// covers everything within about `9.0e6` whole units; beyond that the
-    /// conversion rounds, and this becomes the boundary where determinism stops
-    /// being free.
+    /// # Which values survive exactly
+    ///
+    /// An `f64` carries 53 bits of significand, so the conversion is exact exactly
+    /// while the **raw integer** fits in 53 bits — that is, for values under
+    /// `2^(53 - FRACTION_BITS)` whole units. At the default 32 fractional bits that
+    /// is `2^21`, about 2.1 million whole units, not the 9 million this once claimed.
+    ///
+    /// Larger values are not all lost: one whose low bits happen to be zero still
+    /// converts exactly, because it needs fewer significant bits than its magnitude
+    /// suggests. But no *guarantee* covers them, and beyond that bound is where
+    /// determinism stops being free.
     pub fn to_f64(self) -> f64 {
         self.0 as f64 / Self::SCALE as f64
     }
 
     /// The nearest `f32`, for a renderer or a vertex buffer.
+    ///
+    /// # Which values survive exactly
+    ///
+    /// An `f32` carries 24 bits of significand, so by the same argument as
+    /// [`FixedPoint::to_f64`] the exact range is values under `2^(24 - FRACTION_BITS)`
+    /// whole units. At the default 32 fractional bits that exponent is negative: only
+    /// values below `2^-8` are guaranteed exact, and an ordinary coordinate is not
+    /// among them. This is a lossy conversion for rendering, and is meant to be.
     ///
     /// Rounds far sooner than [`Fixed::to_f64`] does, at about 8 whole units,
     /// since an `f32` carries only 24 significant bits.
@@ -620,11 +688,11 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
 impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// The square root, truncated towards zero, or `None` for a negative value.
     ///
-    /// Computed digit by digit in integers on the value scaled up by `2^32`,
-    /// held in 256 bits, so the result is the largest [`Fixed`] whose square
-    /// does not exceed this one. Exact in the sense that matters: no
-    /// approximation of a real-valued function is involved, and no platform can
-    /// disagree about it.
+    /// Computed digit by digit in integers on the value scaled up by
+    /// `2^FRACTION_BITS`, held in 256 bits, so the result is the largest value of
+    /// this layout whose square does not exceed this one. Exact in the sense that
+    /// matters: no approximation of a real-valued function is involved, and no
+    /// platform can disagree about it.
     pub fn sqrt(self) -> Option<Self> {
         if self.0 < 0 {
             return None;
@@ -708,31 +776,90 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
         wide::apply_sign(magnitude, sign).map(Self)
     }
 
-    /// Two raised to this value, or `None` above 95, where the result no longer
-    /// fits.
+    /// Two raised to this value, or `None` where the result no longer fits.
     ///
     /// The whole part of the exponent becomes a shift and only the fraction
-    /// needs work, which is what keeps the series short. Correctly rounded:
-    /// the result is never more than half a step from the true value. Anything
-    /// below -32 gives zero, which is that rounding rather than a failure.
+    /// needs work, which is what keeps the series short.
+    ///
+    /// # Range
+    ///
+    /// The limits follow from the layout rather than being chosen: the largest
+    /// value is just under `2^(127 - FRACTION_BITS)`, so anything at or above that
+    /// exponent gives `None`, and anything below `-(FRACTION_BITS + 1)` is nearer
+    /// zero than to the smallest positive step and gives [`FixedPoint::ZERO`]. For
+    /// the default layout that is `None` above 95 and zero below -33.
+    ///
+    /// Zero is the rounded answer rather than a failure; `None` means the result
+    /// genuinely does not fit.
+    ///
+    /// # Accuracy
+    ///
+    /// Measured against an independent high-precision evaluation at 8, 16, 32 and 64
+    /// fractional bits: within **half a step** wherever the result is at most one.
+    /// Above that the error grows in proportion to the result, because the step is a
+    /// fixed absolute size while the algorithm's error is relative.
+    ///
+    /// Not "correctly rounded", which this once claimed: that would mean the nearest
+    /// representable value for *every* input, and it does not hold for large results.
     pub fn exp2(self) -> Option<Self> {
+        // The domain is settled first, because the rescaling below is a left shift
+        // that would wrap silently on a large raw value — in release *and* in debug,
+        // since a shift only traps on an out-of-range shift count, never on the bits
+        // it pushes off the top.
+        let whole: i128 = self.0 >> FRACTION_BITS;
+
+        if whole >= Self::EXP2_TOO_LARGE {
+            return None;
+        }
+
+        if whole < Self::EXP2_UNDERFLOWS {
+            return Some(Self::ZERO);
+        }
+
+        // Past those guards the exponent is a small number of whole units, so the
+        // shift has room: `|self.0|` is under `2^(FRACTION_BITS + 8)` and the shift
+        // adds only LOG_GUARD_BITS more.
         exp2_wide::<FRACTION_BITS>(self.0 << (Self::LOG_BITS - FRACTION_BITS))
     }
 
-    /// `e` raised to this value, or `None` above about 65.85, where the result
-    /// no longer fits.
+    /// `e` raised to this value, or `None` where the result no longer fits.
     ///
     /// The exponent is split as `k * ln 2 + r` with `r` in `[0, ln 2)`, so the
     /// whole of it becomes a shift and the series only ever sees a small
-    /// remainder, where it converges in a dozen terms. Correctly rounded, as
-    /// [`Fixed::exp2`] is. Anything below about -22.19 gives zero, which is
-    /// that rounding rather than a failure: `exp(-30)` really is nearer zero
-    /// than to any other value this type can hold, and that is the reason a
-    /// distribution's tail cannot be computed here.
+    /// remainder, where it converges in a dozen terms.
+    ///
+    /// # Range
+    ///
+    /// The same layout limits as [`FixedPoint::exp2`], carried across by `ln 2`:
+    /// `None` above about `(127 - FRACTION_BITS) * ln 2`, and zero below about
+    /// `-(FRACTION_BITS + 1) * ln 2`. For the default layout that is `None` above
+    /// roughly 65.85 and zero below roughly -22.9.
+    ///
+    /// Zero really is the rounded answer: `exp(-30)` is nearer zero than to any
+    /// other value this type can hold, which is why a distribution's tail cannot be
+    /// computed here.
+    ///
+    /// # Accuracy
+    ///
+    /// Within **half a step** wherever the result is at most one, measured as for
+    /// [`FixedPoint::exp2`]. Beyond that the error grows with the result and is a
+    /// little worse than `exp2`'s, because the argument reduction divides by `ln 2`
+    /// and so carries that constant's own representation error once per halving:
+    /// at 64 fractional bits a result near `7e10` was 100 steps out, a relative
+    /// error below `2^-93`.
     pub fn exp(self) -> Option<Self> {
-        // Beyond this the shift below could not fit, let alone the answer.
-        if self.0.unsigned_abs() > (1 << 100) {
-            return (self.0 < 0).then_some(Self::ZERO);
+        // As in `exp2`, the domain has to be settled before the rescaling, which is
+        // a left shift that would wrap quietly on a large raw value. The previous
+        // guard admitted raw values up to `2^100`, which a shift of 64 turned into
+        // `2^164` and wrapped.
+        let whole: i128 = self.0 >> FRACTION_BITS;
+
+        if whole > Self::EXP_TOO_LARGE {
+            return None;
+        }
+
+        if whole < Self::EXP_UNDERFLOWS {
+            return Some(Self::ZERO);
         }
 
         let exponent: i128 = self.0 << (WORKING_BITS - FRACTION_BITS);
@@ -778,7 +905,17 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// negative power inverts first, since the truncation in a tiny
     /// intermediate would otherwise be magnified by the inversion.
     pub fn powi(self, exponent: i32) -> Option<Self> {
-        let invert_first: bool = exponent < 0 && self.abs() < Self::ONE;
+        // Anything to the zero is one, including zero and MIN. Settling it first
+        // means the rest never has to reason about a base it will not look at.
+        if exponent == 0 {
+            return Some(Self::ONE);
+        }
+
+        // A magnitude comparison on the raw integer, because `abs` panics on MIN,
+        // whose positive counterpart does not exist — and an `Option`-returning
+        // power should report that it cannot answer, not abort.
+        let below_one: bool = self.0.unsigned_abs() < Self::ONE.0 as u128;
+        let invert_first: bool = exponent < 0 && below_one;
         let mut remaining: u32 = exponent.unsigned_abs();
         let mut base: Self = if invert_first {
             self.checked_recip()?
@@ -914,17 +1051,48 @@ fn place<const FRACTION_BITS: u32>(mantissa: u128, halvings: i128) -> Option<Fix
     (widened.high == 0 && widened.low <= i128::MAX as u128).then_some(FixedPoint(widened.low as i128))
 }
 
-/// A signed value shifted right by `places`, rounded to nearest rather than
-/// towards negative infinity, which keeps a logarithm or an exponential from
-/// being biased low.
-fn round_shift(value: i128, places: u32) -> i128 {
+/// A signed value divided by `2^places`, rounded to nearest with ties to even.
+///
+/// # Why this rule, and why one helper
+///
+/// This is the rounding every narrowing step in the file goes through — the
+/// logarithms, the exponentials, the trigonometry and the named constants — so that
+/// they cannot drift apart. Ties to even matches [`Unit`](crate::math::Unit), which
+/// makes it the crate's standard, and it is the only common rule that does not bias
+/// a long run of roundings in one direction.
+///
+/// It is deliberately *not* what the arithmetic operators do: [`FixedPoint::checked_mul`]
+/// and friends truncate towards zero, because a product is an exact value being cut
+/// to the grid rather than a real number being named. Both are documented where they
+/// are used.
+///
+/// # Why not `(value + half) >> places`
+///
+/// That form is what this replaced. It rounds halves towards positive infinity, so
+/// it treats the two signs differently, and `value + half` overflows outright near
+/// the top of the range. Here the shift happens first, so nothing can overflow: the
+/// quotient is at most half the input and `quotient + 1` cannot leave the type.
+const fn round_shift(value: i128, places: u32) -> i128 {
     if places == 0 {
         return value;
     }
 
+    if places >= i128::BITS {
+        // Everything has been shifted away; what is left is below half a step.
+        return 0;
+    }
+
+    // An arithmetic shift floors, and masking gives a remainder that is never
+    // negative, so one comparison decides the rounding for both signs alike.
+    let quotient: i128 = value >> places;
+    let remainder: i128 = value & ((1 << places) - 1);
     let half: i128 = 1 << (places - 1);
 
-    (value + half) >> places
+    if remainder > half || (remainder == half && (quotient & 1) == 1) {
+        quotient + 1
+    } else {
+        quotient
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,9 +1219,15 @@ impl<const FRACTION_BITS: u32> Shr<u32> for FixedPoint<FRACTION_BITS> {
     }
 }
 
+/// Writes an assignment operator for every layout, in terms of the matching binary
+/// operator — which is itself generic, so `x += y` works wherever `x + y` does.
+///
+/// These were written for the [`Fixed`] alias alone while the type was still fixed to
+/// one width. Nothing about them depended on that width, so a `FixedPoint<16>` simply
+/// had no `+=` for no reason.
 macro_rules! implement_assign {
     ($trait:ident, $method:ident, $operator:tt, $rhs:ty) => {
-        impl $trait<$rhs> for Fixed {
+        impl<const FRACTION_BITS: u32> $trait<$rhs> for FixedPoint<FRACTION_BITS> {
             fn $method(&mut self, other: $rhs) {
                 *self = *self $operator other;
             }
@@ -1061,11 +1235,11 @@ macro_rules! implement_assign {
     };
 }
 
-implement_assign!(AddAssign, add_assign, +, Fixed);
-implement_assign!(SubAssign, sub_assign, -, Fixed);
-implement_assign!(MulAssign, mul_assign, *, Fixed);
-implement_assign!(DivAssign, div_assign, /, Fixed);
-implement_assign!(RemAssign, rem_assign, %, Fixed);
+implement_assign!(AddAssign, add_assign, +, Self);
+implement_assign!(SubAssign, sub_assign, -, Self);
+implement_assign!(MulAssign, mul_assign, *, Self);
+implement_assign!(DivAssign, div_assign, /, Self);
+implement_assign!(RemAssign, rem_assign, %, Self);
 implement_assign!(MulAssign, mul_assign, *, i128);
 implement_assign!(DivAssign, div_assign, /, i128);
 implement_assign!(ShlAssign, shl_assign, <<, u32);
@@ -1364,60 +1538,65 @@ impl From<ParseIntError> for ParseFixedError {
 /// is the nearest representable value at or before the one written. No `f64` is
 /// involved at any point, which is what keeps a written-down value and the one
 /// read back from it in step.
+impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
+    /// Reads decimal notation exactly, with no float anywhere in between.
+    ///
+    /// # Question
+    ///
+    /// "What value of this layout most closely represents the decimal number in this
+    /// text?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use voxel_world::math::Fixed;
+    ///
+    /// assert_eq!(Fixed::from_decimal_str("1.25").unwrap(), Fixed::ONE + Fixed::ONE / 4);
+    /// assert_eq!(Fixed::from_decimal_str("1e3").unwrap(), Fixed::from_integer(1000));
+    ///
+    /// assert!(Fixed::from_decimal_str("1..2").is_err());
+    /// ```
+    ///
+    /// # What it accepts
+    ///
+    /// The syntax [`decimal::parse`](crate::math::decimal::parse) documents: an
+    /// optional sign, digits with at most one point, underscores anywhere, and an
+    /// optional `e` or `E` exponent with its own sign.
+    ///
+    /// # Rounding, and how it differs from what this used to do
+    ///
+    /// Nearest, ties to even — the same rule [`fixed!`](crate::fixed) uses, so the
+    /// literal and the parsed string agree bit for bit.
+    ///
+    /// The earlier implementation truncated towards zero and stopped after 38
+    /// fractional digits. Both are gone: a long decimal is now carried through
+    /// [`BigUint`](crate::math::BigUint) and rounded once, exactly.
+    pub fn from_decimal_str(text: &str) -> Result<Self, ParseFixedError> {
+        decimal::fixed_bits_exact(text, FRACTION_BITS)
+            .map(Self)
+            .map_err(ParseFixedError::from)
+    }
+}
+
+impl From<decimal::DecimalError> for ParseFixedError {
+    fn from(error: decimal::DecimalError) -> Self {
+        match error {
+            decimal::DecimalError::Empty => Self::Empty,
+            decimal::DecimalError::Invalid => Self::Invalid,
+            decimal::DecimalError::TooManyDigits
+            | decimal::DecimalError::OutOfRange
+            | decimal::DecimalError::NotAUnit => Self::OutOfRange,
+        }
+    }
+}
+
+/// Reads decimal notation through [`FixedPoint::from_decimal_str`], which never
+/// involves a float.
 impl<const FRACTION_BITS: u32> FromStr for FixedPoint<FRACTION_BITS> {
     type Err = ParseFixedError;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let (negative, digits) = match text.strip_prefix('-') {
-            Some(rest) => (true, rest),
-            None => (false, text.strip_prefix('+').unwrap_or(text)),
-        };
-
-        let (whole_text, fraction_text) = match digits.split_once('.') {
-            Some((whole, fraction)) => (whole, fraction),
-            None => (digits, ""),
-        };
-
-        if whole_text.is_empty() && fraction_text.is_empty() {
-            return Err(ParseFixedError::Empty);
-        }
-
-        if !fraction_text.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(ParseFixedError::Invalid);
-        }
-
-        let whole: u128 = if whole_text.is_empty() {
-            0
-        } else {
-            whole_text.parse::<u128>()?
-        };
-
-        // Read the fractional digits as one integer over a power of ten, then
-        // scale that fraction up in 256 bits, so no digit is lost on the way.
-        let mut written: u128 = 0;
-        let mut power: u128 = 1;
-
-        for digit in fraction_text.bytes().take(38).map(u128::from) {
-            let Some(next) = power.checked_mul(10) else {
-                break;
-            };
-
-            written = written * 10 + (digit - u128::from(b'0'));
-            power = next;
-        }
-
-        let fraction: u128 = wide::divide(wide::shift_left(written, FRACTION_BITS), power)
-            .ok_or(ParseFixedError::OutOfRange)?;
-
-        let magnitude: u128 = whole
-            .checked_shl(FRACTION_BITS)
-            .filter(|scaled| scaled >> FRACTION_BITS == whole)
-            .and_then(|scaled| scaled.checked_add(fraction))
-            .ok_or(ParseFixedError::OutOfRange)?;
-
-        wide::apply_sign(magnitude, negative)
-            .map(Self)
-            .ok_or(ParseFixedError::OutOfRange)
+        Self::from_decimal_str(text)
     }
 }
 
@@ -1440,9 +1619,7 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// loop's own error is bounded far below the last bit of this layout, so this
     /// single rounding is the only one that reaches the result.
     fn from_internal(value: i128) -> Self {
-        let shift: u32 = cordic::BITS - FRACTION_BITS;
-
-        Self((value + (1 << (shift - 1))) >> shift)
+        Self(round_shift(value, cordic::BITS - FRACTION_BITS))
     }
 
     /// The sine and cosine of an angle in radians, together.
@@ -1472,12 +1649,25 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// [`sin`]: Self::sin
     /// [`cos`]: Self::cos
     ///
-    /// # Accuracy
+    /// # Accuracy, and the angle beyond which it degrades
     ///
-    /// Within one step of the true value for any angle of modest size. The working
-    /// precision is 96 fractional bits against at most 64 here, and the reduction
-    /// error grows as `|angle| × 2⁻⁹³`, so an angle would have to exceed `2²⁹`
-    /// radians before it reached the last bit at 64 fractional bits.
+    /// Measured within **half a step** for angles up to `10^5` radians, at 8, 16, 32
+    /// and 64 fractional bits.
+    ///
+    /// The limit is the argument reduction, which folds the angle into `[0, τ)`
+    /// against a 96-bit `1/τ`. Its error grows as `|angle| × 2⁻⁹³`, so the useful
+    /// range depends on the width:
+    ///
+    /// | fractional bits | full accuracy up to | meaningless beyond |
+    /// |---|---|---|
+    /// | 32 | about `2⁶¹` radians | about `2⁹³` |
+    /// | 64 | about `2²⁹` radians | about `2⁹³` |
+    ///
+    /// Past the right-hand column the reduction has lost every bit of the fraction
+    /// and the answer is noise — but it is *deterministic* noise, and it does not
+    /// overflow: the reduction runs in 256 bits and is defined for every `i128`.
+    /// An angle that large has already lost the precision in its own representation,
+    /// so nothing here is recoverable by working harder.
     pub fn sin_cos(self) -> (Self, Self) {
         let (cosine, sine): (i128, i128) = cordic::cosine_sine(self.0, FRACTION_BITS);
 
@@ -1664,13 +1854,7 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// so. Where that matters, prefer [`atan2`](Self::atan2) on the two components
     /// directly and never form the sine at all.
     pub fn asin(self) -> Option<Self> {
-        let square: Self = self.checked_mul(self)?;
-
-        // `square` is in [0, 1] whenever the input is, so this cannot overflow; and
-        // where it is not, `sqrt` of the negative returns None, which is the answer.
-        let root: Self = Self(Self::ONE.0 - square.0).sqrt()?;
-
-        Some(self.atan2(root))
+        Some(self.atan2(self.cosine_of_arc()?))
     }
 
     /// The angle whose cosine is this, in `[0, π]`, or [`None`] outside `[-1, 1]`.
@@ -1693,10 +1877,36 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// loss of accuracy near `±1`. This is the usual way to turn a dot product of two
     /// unit vectors into the angle between them.
     pub fn acos(self) -> Option<Self> {
-        let square: Self = self.checked_mul(self)?;
-        let root: Self = Self(Self::ONE.0 - square.0).sqrt()?;
+        Some(self.cosine_of_arc()?.atan2(self))
+    }
 
-        Some(root.atan2(self))
+    /// `sqrt(1 - self^2)`, for [`asin`](Self::asin) and [`acos`](Self::acos).
+    ///
+    /// [`None`] exactly when `self` is outside `[-1, 1]`, and never because of an
+    /// intermediate.
+    ///
+    /// # Why the domain is tested before the multiplication rather than after
+    ///
+    /// Leaving it to `sqrt` to notice a negative would conflate two different
+    /// failures: a value genuinely outside the domain, and a value inside it whose
+    /// square happened to round past one. Testing the raw magnitude first means only
+    /// the first can happen, so a representable input in `[-1, 1]` always produces an
+    /// answer.
+    ///
+    /// Within the domain the squaring truncates towards zero, so `self^2` never
+    /// exceeds the true square and `1 - self^2` cannot go negative. The clamp below
+    /// is therefore unreachable arithmetic rather than a correction — it is there so
+    /// that a future change to the multiplication's rounding cannot turn a valid
+    /// input into a `None` without anyone noticing.
+    fn cosine_of_arc(self) -> Option<Self> {
+        if self.0.unsigned_abs() > Self::ONE.0 as u128 {
+            return None;
+        }
+
+        let square: Self = self.checked_mul(self)?;
+        let remainder: i128 = Self::ONE.0 - square.0;
+
+        Self(remainder.max(0)).sqrt()
     }
 
     /// The hyperbolic sine, or [`None`] where it does not fit.
@@ -1717,10 +1927,19 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// that accuracy and determinism. It grows as fast as `eˣ` does, so it returns
     /// [`None`] once the result leaves the layout's range.
     pub fn sinh(self) -> Option<Self> {
-        let up: Self = self.exp()?;
-        let down: Self = Self(-self.0).exp()?;
+        // `sinh(-x) = -sinh(x)`, so the work is done on the positive side and the
+        // sign put back afterwards. Negating the raw value directly would overflow
+        // on MIN, whose positive counterpart is not representable — and MIN is far
+        // past where a hyperbolic sine fits anyway, so `checked_abs` reporting
+        // `None` there is the right answer rather than a dodge.
+        let magnitude: Self = Self(self.0.checked_abs()?);
 
-        Some(Self(up.0.checked_sub(down.0)? / 2))
+        let up: Self = magnitude.exp()?;
+        let down: Self = Self(-magnitude.0).exp()?;
+
+        let half: i128 = up.0.checked_sub(down.0)? / 2;
+
+        Some(Self(if self.0 < 0 { -half } else { half }))
     }
 
     /// The hyperbolic cosine, or [`None`] where it does not fit.
@@ -1736,8 +1955,12 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
     /// `(eˣ + e⁻ˣ)/2`, built from [`exp`](Self::exp). Never below one, and growing as
     /// fast as `eˣ`.
     pub fn cosh(self) -> Option<Self> {
-        let up: Self = self.exp()?;
-        let down: Self = Self(-self.0).exp()?;
+        // `cosh(-x) = cosh(x)`, so only the magnitude matters. As in `sinh`, MIN has
+        // no positive counterpart and is far past where the result fits.
+        let magnitude: Self = Self(self.0.checked_abs()?);
+
+        let up: Self = magnitude.exp()?;
+        let down: Self = Self(-magnitude.0).exp()?;
 
         Some(Self(up.0.checked_add(down.0)? / 2))
     }
@@ -1769,31 +1992,45 @@ impl<const FRACTION_BITS: u32> FixedPoint<FRACTION_BITS> {
         // value, so returning the bound is exact, not a clamp.
         const SATURATION: i64 = 23;
 
-        if self.0 >= Self::from_integer(SATURATION).0 {
+        // `tanh(-x) = -tanh(x)`, so the work happens on the magnitude and the sign
+        // goes back on at the end. Computing the two signs independently would give
+        // a function that is *nearly* odd: each side rounds its own quotient, and the
+        // two quotients do not agree in the last step. MIN has no magnitude, and is
+        // far past saturation in any case.
+        let negative: bool = self.0 < 0;
+        let magnitude: i128 = self.0.checked_abs().unwrap_or(i128::MAX);
+
+        let positive: Self = Self::tanh_of_magnitude(magnitude, SATURATION);
+
+        // The result is in [0, 1], so negating it cannot leave the range.
+        Self(if negative { -positive.0 } else { positive.0 })
+    }
+
+    /// `tanh` of a value already known to be at or above zero.
+    fn tanh_of_magnitude(magnitude: i128, saturation: i64) -> Self {
+        if magnitude >= Self::from_integer(saturation).0 {
             return Self::ONE;
         }
 
-        if self.0 <= Self::from_integer(-SATURATION).0 {
-            return Self::NEGATIVE_ONE;
-        }
-
-        let Some(doubled) = Self(self.0 * 2).exp() else {
+        // The guard above leaves `magnitude < 23 * 2^FRACTION_BITS`, so the doubling
+        // is under `46 * 2^64` even at the widest layout — about `2^69`, far inside
+        // an `i128`. The multiplication is safe *because* of the saturation, not
+        // independently of it.
+        let Some(doubled) = Self(magnitude * 2).exp() else {
             return Self::ONE;
         };
 
         let numerator: i128 = doubled.0 - Self::ONE.0;
         let denominator: i128 = doubled.0 + Self::ONE.0;
 
-        let negative: bool = numerator < 0;
-
         let Some(quotient) = wide::divide(
             wide::shift_left(numerator.unsigned_abs(), FRACTION_BITS),
             denominator.unsigned_abs(),
         ) else {
-            return if negative { Self::NEGATIVE_ONE } else { Self::ONE };
+            return Self::ONE;
         };
 
-        wide::apply_sign(quotient, negative).map_or(Self::ONE, Self)
+        Self(quotient.min(Self::ONE.0 as u128) as i128)
     }
 }
 

@@ -101,6 +101,7 @@
 //! quietly saturating.
 
 use crate::math::fixed::Fixed;
+use crate::math::decimal::{self, DecimalError};
 use crate::math::rational::Ratio;
 use std::fmt;
 
@@ -179,6 +180,41 @@ impl Unit {
     }
 
     /// A value from its raw count, clamped to one.
+    /// Reads decimal notation exactly, with no float anywhere in between.
+    ///
+    /// # Question
+    ///
+    /// "What `Unit` most closely represents the decimal value in this text?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use voxel_world::math::Unit;
+    ///
+    /// assert_eq!(Unit::from_decimal_str("0.5").unwrap(), Unit::HALF);
+    /// assert_eq!(Unit::from_decimal_str("1e-2").unwrap(), Unit::from_decimal_str("0.01").unwrap());
+    ///
+    /// // Outside the interval is an error, not a clamp.
+    /// assert!(Unit::from_decimal_str("1.1").is_err());
+    /// assert!(Unit::from_decimal_str("-0.1").is_err());
+    /// ```
+    ///
+    /// # Why this rather than [`Unit::new`]
+    ///
+    /// [`Unit::new`] takes an `f64` that already exists. This takes the decimal text
+    /// itself, so `0.2` is read as the exact rational `2/10` and rounded once onto
+    /// the `k / 2^63` grid, rather than being rounded first to the nearest `f64` and
+    /// then again to the grid.
+    ///
+    /// # Rounding
+    ///
+    /// Nearest, ties to even — the same rule as
+    /// [`Unit::try_from_ratio`], so a literal, a parsed string and a converted ratio
+    /// naming the same number all land on the same count.
+    pub fn from_decimal_str(text: &str) -> Result<Self, DecimalError> {
+        decimal::unit_bits_exact(text).map(Self)
+    }
+
     pub const fn from_bits_clamped(count: u64) -> Self {
         if count > SCALE {
             return Self::ONE;
@@ -285,7 +321,7 @@ impl Unit {
     /// exactly. See the module documentation.
     ///
     /// This is the *single* definition of how a random word becomes a `Unit`.
-    /// [`Unit::from_seed`], [`RandomSource::unit`](crate::random::RandomSource::unit)
+    /// [`Unit::from_seed`], [`StochasticSource::unit`](crate::random::StochasticSource::unit)
     /// and [`UniformUnit`](crate::random::unit::UniformUnit) all route through it, so every path produces the same
     /// value from the same word — which is what makes a replay reproducible no
     /// matter which one the caller reached for.
@@ -961,3 +997,18 @@ impl fmt::Display for RatioOutOfRange {
 }
 
 impl std::error::Error for RatioOutOfRange {}
+
+/// Reads decimal notation through [`Unit::from_decimal_str`], which never involves a
+/// float.
+///
+/// The error is [`DecimalError`] rather than a type of its own, because every way the
+/// text can fail is already one of its cases — including
+/// [`DecimalError::NotAUnit`](crate::math::DecimalError::NotAUnit) for a value
+/// outside `[0, 1]`.
+impl std::str::FromStr for Unit {
+    type Err = DecimalError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::from_decimal_str(text)
+    }
+}

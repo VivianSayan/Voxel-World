@@ -58,8 +58,10 @@ mod ordered_multi_rota;
 mod ordered_rota;
 #[allow(clippy::module_inception)]
 mod rota;
+mod tick_rota;
 
 pub use multi_rota::MultiRota;
 pub use ordered_multi_rota::OrderedMultiRota;
 pub use ordered_rota::OrderedRota;
 pub use rota::Rota;
+pub use tick_rota::{TickRota, TickRotaUpdate};

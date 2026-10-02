@@ -1,7 +1,7 @@
 //! Traits for collections that attach a quantity to each element: a count,
 //! a weight or a degree of membership.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::traits::collection::{
     Choose, Collection, CollectionInsert, CollectionRemove,
 };
@@ -68,7 +68,7 @@ pub trait WeightedChoose: Measured {
     ///
     /// `None` when the collection is empty or nothing in it has a positive
     /// finite quantity. Walks the elements once and allocates nothing.
-    fn choose_weighted(&self, random: &mut Random) -> Option<&Self::Item>;
+    fn choose_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&Self::Item>;
 
     /// Up to `amount` distinct elements, each drawn in proportion to its
     /// quantity among those not yet taken.
@@ -77,7 +77,7 @@ pub trait WeightedChoose: Measured {
     /// elements carry a positive quantity. Never repeats an element, which is
     /// what makes this different from calling
     /// [`choose_weighted`](WeightedChoose::choose_weighted) repeatedly.
-    fn choose_multiple_weighted(&self, random: &mut Random, amount: usize) -> Vec<&Self::Item>;
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&Self::Item>;
 
     /// The chance of [`choose_weighted`](WeightedChoose::choose_weighted)
     /// returning this element, as its share of the total.

@@ -1,6 +1,16 @@
 //! Random selection helpers shared by the collections.
+//!
+//! # Any source, not just a stream
+//!
+//! Each of these takes anything implementing
+//! [`StochasticSource`](crate::random::StochasticSource), so the same helper serves a
+//! [`Random`](crate::random::Random) stream and a
+//! [`Seed`](crate::random::seed::Seed)'s cursor alike. They were written for `Random`
+//! alone, which meant a seed — the thing a world uses to get the *same* answer every
+//! time — could not shuffle anything at all.
 
-use crate::random::Random;
+use crate::random::distributions::{Distribution, Exponential};
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::units::Rate;
 
@@ -11,11 +21,21 @@ use crate::units::Rate;
 /// "What is a random ordering of these items?"
 ///
 /// Every ordering is equally likely. One draw per item, in place, no allocation.
-pub fn shuffle<T>(items: &mut [T], random: &mut Random) {
+pub fn shuffle<T, S: StochasticSource + ?Sized>(items: &mut [T], source: &mut S) {
     for last in (1..items.len()).rev() {
-        let other = random.uniform_index(last + 1);
+        let other = index_below(last + 1, source);
         items.swap(last, other);
     }
+}
+
+/// A uniform index below `length`, which must not be zero.
+///
+/// The one place the helpers here turn a word into a position, so they all share a
+/// single unbiased bounded draw rather than each reaching for its own.
+fn index_below<S: StochasticSource + ?Sized>(length: usize, source: &mut S) -> usize {
+    debug_assert!(length > 0, "cannot draw an index from an empty range");
+
+    source.bounded_u64(length as u64) as usize
 }
 
 /// Shuffles just enough to fill the first `count` places, and reports how many
@@ -36,12 +56,16 @@ pub fn shuffle<T>(items: &mut [T], random: &mut Random) {
 ///
 /// Returns how many places were actually filled, which is `count` unless the slice
 /// is shorter.
-pub fn partial_shuffle<T>(items: &mut [T], count: usize, random: &mut Random) -> usize {
+pub fn partial_shuffle<T, S: StochasticSource + ?Sized>(
+    items: &mut [T],
+    count: usize,
+    source: &mut S,
+) -> usize {
     let wanted: usize = count.min(items.len());
 
     for position in 0..wanted {
         // Pick from this position onwards, so nothing already chosen is disturbed.
-        let other: usize = position + random.uniform_index(items.len() - position);
+        let other: usize = position + index_below(items.len() - position, source);
         items.swap(position, other);
     }
 
@@ -76,9 +100,10 @@ pub fn partial_shuffle<T>(items: &mut [T], count: usize, random: &mut Random) ->
 /// platform-dependent. Algorithm R uses only integer draws, so the same seed keeps
 /// the same items on every target. For a crate whose worlds have to replay, that is
 /// worth more than the constant factor.
-pub fn reservoir_sample<T, I>(stream: I, count: usize, random: &mut Random) -> Vec<T>
+pub fn reservoir_sample<T, I, S>(stream: I, count: usize, source: &mut S) -> Vec<T>
 where
     I: IntoIterator<Item = T>,
+    S: StochasticSource + ?Sized,
 {
     if count == 0 {
         return Vec::new();
@@ -94,10 +119,12 @@ where
 
         // The `position`-th item (counting from zero) is the `position + 1`-th seen,
         // and belongs in the reservoir with chance `count / (position + 1)`.
-        let candidate: u64 = random.uniform_u64(0, position as u64);
+        // One of the `position + 1` items seen so far, so the chance of landing in
+        // the reservoir is `count / (position + 1)`.
+        let candidate: usize = index_below(position + 1, source);
 
-        if (candidate as usize) < count {
-            kept[candidate as usize] = item;
+        if candidate < count {
+            kept[candidate] = item;
         }
     }
 
@@ -114,21 +141,25 @@ where
 /// cost stays proportional to `k` however large the population is: sampling
 /// three indices out of `usize::MAX` allocates three entries.
 ///
-/// Without a [`Random`], returns the first `k` indices, which is what the
+/// Without a source, returns the first `k` indices, which is what the
 /// collections use when they have no generator to hand.
-pub fn uniform_indices(len: usize, k: usize, random: Option<&mut Random>) -> Vec<usize> {
+pub fn uniform_indices<S: StochasticSource + ?Sized>(
+    len: usize,
+    k: usize,
+    source: Option<&mut S>,
+) -> Vec<usize> {
     let k = k.min(len);
     if k == 0 {
         return Vec::new();
     }
-    let Some(random) = random else {
+    let Some(source) = source else {
         return (0..k).collect();
     };
 
     if k > len / 4 {
         let mut pool: Vec<usize> = (0..len).collect();
         for position in 0..k {
-            let other = position + random.uniform_index(len - position);
+            let other = position + index_below(len - position, source);
             pool.swap(position, other);
         }
         pool.truncate(k);
@@ -138,7 +169,7 @@ pub fn uniform_indices(len: usize, k: usize, random: Option<&mut Random>) -> Vec
     let mut moved = FastHashMap::with_capacity_and_hasher(k, Default::default());
     let mut indices = Vec::with_capacity(k);
     for position in 0..k {
-        let other = position + random.uniform_index(len - position);
+        let other = position + index_below(len - position, source);
         let at_position = moved.remove(&position).unwrap_or(position);
         let at_other = if position == other {
             at_position
@@ -160,7 +191,11 @@ pub fn uniform_indices(len: usize, k: usize, random: Option<&mut Random>) -> Vec
 /// Uses exponential keys (Efraimidis-Spirakis): each index gets
 /// `Exp(1) / weight` and the `k` smallest keys win. Selection is O(n), followed
 /// by O(k log k) to return them in draw order.
-pub fn weighted_indices(weights: &[f64], k: usize, random: &mut Random) -> Vec<usize> {
+pub fn weighted_indices<S: StochasticSource + ?Sized>(
+    weights: &[f64],
+    k: usize,
+    source: &mut S,
+) -> Vec<usize> {
     if k == 0 {
         return Vec::new();
     }
@@ -168,7 +203,7 @@ pub fn weighted_indices(weights: &[f64], k: usize, random: &mut Random) -> Vec<u
         .iter()
         .enumerate()
         .filter(|(_, weight)| weight.is_finite() && **weight > 0.0)
-        .map(|(index, weight)| (random.exponential(Rate::UNIT) / weight, index))
+        .map(|(index, weight)| (Exponential::new(Rate::UNIT).sample(source) / weight, index))
         .collect();
 
     let k = k.min(keyed.len());

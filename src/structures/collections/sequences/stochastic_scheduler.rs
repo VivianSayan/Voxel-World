@@ -2,7 +2,7 @@
 //! that no one step carries the crowd.
 
 use super::cadence::{Cadence, OnBacklog};
-use crate::random::{DrawSource, Seed, SeedCursor, UniformU64};
+use crate::random::{StochasticStream, Seed, SeedCursor, UniformU64};
 use crate::structures::hashing::unordered_hash;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{
@@ -87,7 +87,7 @@ struct Entry<T, R> {
 ///   is compact and replayable from the world seed, or a
 ///   [`Random`](crate::random::Random), which is a stream of its own, or
 ///   [`EventRandom`](crate::random::EventRandom) to mix the two. See
-///   [`DrawSource`].
+///   [`StochasticStream`].
 ///
 /// # What it does
 ///
@@ -136,7 +136,7 @@ pub struct StochasticScheduler<T, R = SeedCursor> {
     serial: u64,
 }
 
-impl<T: Element, R: DrawSource> StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> StochasticScheduler<T, R> {
     /// An empty scheduler whose entries derive their randomness from `domain`.
     ///
     /// Derive that seed once, from the world seed, and let the scheduler branch
@@ -504,7 +504,7 @@ impl<T: Element, R: DrawSource> StochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> Collection for StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> Collection for StochasticScheduler<T, R> {
     type Item = T;
 
     fn len(&self) -> usize {
@@ -522,7 +522,7 @@ impl<T: Element, R: DrawSource> Collection for StochasticScheduler<T, R> {
 }
 
 /// Ordered by the step work is due on, so a range is a span of steps.
-impl<T: Element, R: DrawSource> RangeQuery for StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> RangeQuery for StochasticScheduler<T, R> {
     type Key = u64;
     type Item<'a>
         = (u64, &'a T)
@@ -542,9 +542,9 @@ impl<T: Element, R: DrawSource> RangeQuery for StochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> DeterministicOrder for StochasticScheduler<T, R> {}
+impl<T: Element, R: StochasticStream> DeterministicOrder for StochasticScheduler<T, R> {}
 
-impl<T: Element + fmt::Debug, R: DrawSource> fmt::Debug for StochasticScheduler<T, R> {
+impl<T: Element + fmt::Debug, R: StochasticStream> fmt::Debug for StochasticScheduler<T, R> {
     /// As the steps and what is due on them.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -562,7 +562,7 @@ impl<T: Element + fmt::Debug, R: DrawSource> fmt::Debug for StochasticScheduler<
     }
 }
 
-impl<T: Element, R: DrawSource> fmt::Display for StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> fmt::Display for StochasticScheduler<T, R> {
     /// As what is waiting and when the next of it is due.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.next_due() {
@@ -576,7 +576,7 @@ impl<T: Element, R: DrawSource> fmt::Display for StochasticScheduler<T, R> {
 /// only ever so part-way through an advance, since entries are always placed
 /// after the clock; the trait is implemented so that generic code can drain it
 /// alongside the others.
-impl<T: Element, R: DrawSource> Pending for StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> Pending for StochasticScheduler<T, R> {
     type Ready = Firing<T>;
 
     fn pending_len(&self) -> usize {
@@ -595,7 +595,7 @@ impl<T: Element, R: DrawSource> Pending for StochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> StochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> StochasticScheduler<T, R> {
     /// Takes one step and returns what falls due and the gate allows.
     ///
     /// An entry the gate refuses is **not** dropped: it has already drawn its

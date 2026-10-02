@@ -3,7 +3,7 @@
 //! for example `C: CollectionMut + UniqueCollection` for "any set I can
 //! add to".
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::sampling;
 use std::hash::Hash;
 
@@ -183,10 +183,10 @@ pub trait SetAlgebra: Collection + Sized {
 pub trait Choose: Collection {
     /// Chooses one element using the collection's selection policy, or None
     /// when empty. The default policy is uniform over stored entries.
-    fn choose(&self, random: &mut Random) -> Option<&Self::Item> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&Self::Item> {
         let mut chosen = None;
         for (seen, item) in self.elements().enumerate() {
-            if random.uniform_index(seen + 1) == 0 {
+            if source.index_below(seen + 1) == 0 {
                 chosen = Some(item);
             }
         }
@@ -194,7 +194,7 @@ pub trait Choose: Collection {
     }
 
     /// Up to `amount` distinct entries, in random order.
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&Self::Item> {
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&Self::Item> {
         if amount == 0 {
             return Vec::new();
         }
@@ -203,13 +203,13 @@ pub trait Choose: Collection {
             if seen < amount {
                 chosen.push(item);
             } else if amount > 0 {
-                let replacement = random.uniform_index(seen + 1);
+                let replacement = source.index_below(seen + 1);
                 if replacement < amount {
                     chosen[replacement] = item;
                 }
             }
         }
-        sampling::shuffle(&mut chosen, random);
+        sampling::shuffle(&mut chosen, source);
         chosen
     }
 }
@@ -220,16 +220,16 @@ where
     Self::Item: Clone,
 {
     /// Removes one element using the collection's selection policy.
-    fn take_random(&mut self, random: &mut Random) -> Option<Self::Item> {
-        let item = self.choose(random)?.clone();
+    fn take_random<S: StochasticSource + ?Sized>(&mut self, source: &mut S) -> Option<Self::Item> {
+        let item = self.choose(source)?.clone();
         self.remove(&item);
         Some(item)
     }
 
     /// Removes up to `amount` distinct entries using the selection policy.
-    fn take_multiple_random(&mut self, random: &mut Random, amount: usize) -> Vec<Self::Item> {
+    fn take_multiple_random<S: StochasticSource + ?Sized>(&mut self, source: &mut S, amount: usize) -> Vec<Self::Item> {
         let items: Vec<Self::Item> = self
-            .choose_multiple(random, amount)
+            .choose_multiple(source, amount)
             .into_iter()
             .cloned()
             .collect();

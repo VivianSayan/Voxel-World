@@ -4,11 +4,12 @@
 //! of them — [`questions`](super::questions) holds that. A fixed algorithm that
 //! should rarely need to change.
 
+use crate::math::Fixed;
 use crate::math::UnitQuaternion;
 use crate::random::distributions::UniformRotation;
 use crate::random::mixing::mix128;
 use crate::random::seed::Seed;
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::spatial::VoxelPosition3;
 use crate::units::{NoiseValue, Probability, UniformNoise, UniformProbability, Unit, UnitValue};
 
@@ -564,7 +565,43 @@ impl Random {
     /// assert!(!fraction.is_one(), "a draw is half-open");
     /// ```
     pub fn unit(&mut self) -> Unit {
-        <Self as RandomSource>::unit(self)
+        <Self as StochasticSource>::unit(self)
+    }
+
+    /// A uniformly random [`Fixed`] in `[0, 1)`.
+    ///
+    /// # Question
+    ///
+    /// "What is a random fraction, in the type the engine actually computes with?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use voxel_world::math::Fixed;
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// # let mut random = Random::new(Seed::from_integer(1u64));
+    /// let fraction = random.fixed();
+    ///
+    /// assert!(fraction >= Fixed::ZERO && fraction < Fixed::ONE);
+    ///
+    /// // Ready to take part in deterministic arithmetic with no conversion.
+    /// let height = Fixed::from_integer(64) + fraction * Fixed::from_integer(16);
+    /// # let _ = height;
+    /// ```
+    ///
+    /// # Which of the three fractions to reach for
+    ///
+    /// [`Random::unit`] is the finest, at 63 bits, and is the one to compare a chance
+    /// against. This one is coarser but is the type the rest of the engine adds and
+    /// multiplies, so it needs no conversion to be used.
+    /// [`Random::probability`] is for an `f64` API.
+    ///
+    /// All three read one word, so they are one draw at three precisions. For a range
+    /// other than `[0, 1)` use [`Random::fixed_range`], which is not the same as
+    /// scaling this.
+    pub fn fixed(&mut self) -> Fixed {
+        <Self as StochasticSource>::fixed(self)
     }
 
     /// A uniformly random [`Probability`] in `[0, 1)`.
@@ -759,7 +796,7 @@ impl Random {
 
 /// The stream as a source for the samplers, keeping the spare normal so that
 /// a pair of them costs one rejection loop rather than two.
-impl RandomSource for Random {
+impl StochasticSource for Random {
     fn next_u64(&mut self) -> u64 {
         Random::next_u64(self)
     }

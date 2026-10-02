@@ -2,7 +2,7 @@
 
 use super::cadence::Cadence;
 use super::stochastic_scheduler::{CadenceId, Firing, StochasticScheduler};
-use crate::random::{DrawSource, Seed, SeedCursor};
+use crate::random::{StochasticStream, Seed, SeedCursor};
 use crate::structures::hashing::FastHashMap;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{
@@ -35,14 +35,14 @@ use std::ops::RangeBounds;
 /// - `T` is what is scheduled, an [`Element`] so it can be indexed and
 ///   cancelled by value.
 /// - `R` is where each entry's randomness comes from; see
-///   [`DrawSource`].
+///   [`StochasticStream`].
 #[derive(Clone)]
 pub struct UniqueStochasticScheduler<T, R = SeedCursor> {
     inner: StochasticScheduler<T, R>,
     due: FastHashMap<T, u64>,
 }
 
-impl<T: Element, R: DrawSource> UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> UniqueStochasticScheduler<T, R> {
     /// An empty scheduler whose entries derive their randomness from `domain`.
     pub fn new(domain: Seed) -> Self {
         Self {
@@ -203,7 +203,7 @@ impl<T: Element, R: DrawSource> UniqueStochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> Collection for UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> Collection for UniqueStochasticScheduler<T, R> {
     type Item = T;
 
     fn len(&self) -> usize {
@@ -220,10 +220,10 @@ impl<T: Element, R: DrawSource> Collection for UniqueStochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> UniqueCollection for UniqueStochasticScheduler<T, R> {}
+impl<T: Element, R: StochasticStream> UniqueCollection for UniqueStochasticScheduler<T, R> {}
 
 /// Ordered by the step work is due on, as [`StochasticScheduler`] is.
-impl<T: Element, R: DrawSource> RangeQuery for UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> RangeQuery for UniqueStochasticScheduler<T, R> {
     type Key = u64;
     type Item<'a>
         = (u64, &'a T)
@@ -238,22 +238,22 @@ impl<T: Element, R: DrawSource> RangeQuery for UniqueStochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> DeterministicOrder for UniqueStochasticScheduler<T, R> {}
+impl<T: Element, R: StochasticStream> DeterministicOrder for UniqueStochasticScheduler<T, R> {}
 
-impl<T: Element + fmt::Debug, R: DrawSource> fmt::Debug for UniqueStochasticScheduler<T, R> {
+impl<T: Element + fmt::Debug, R: StochasticStream> fmt::Debug for UniqueStochasticScheduler<T, R> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.inner, formatter)
     }
 }
 
-impl<T: Element, R: DrawSource> fmt::Display for UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> fmt::Display for UniqueStochasticScheduler<T, R> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.inner, formatter)
     }
 }
 
 /// As [`StochasticScheduler`]'s, with the index kept in step.
-impl<T: Element, R: DrawSource> Pending for UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> Pending for UniqueStochasticScheduler<T, R> {
     type Ready = Firing<T>;
 
     fn pending_len(&self) -> usize {
@@ -269,7 +269,7 @@ impl<T: Element, R: DrawSource> Pending for UniqueStochasticScheduler<T, R> {
     }
 }
 
-impl<T: Element, R: DrawSource> UniqueStochasticScheduler<T, R> {
+impl<T: Element, R: StochasticStream> UniqueStochasticScheduler<T, R> {
     /// Takes one step and returns what falls due and the gate allows.
     ///
     /// As [`StochasticScheduler::advance_with`]: a refused entry has already

@@ -669,6 +669,19 @@ macro_rules! implement_fixed_vector {
 
             /// The point a fraction `t` of the way from this one to `other`, or
             /// `None` on overflow. Exact at both ends.
+            /// Every component divided by one value, or `None` for a zero divisor or
+            /// on overflow.
+            ///
+            /// # Why this is not `checked_scale` by a reciprocal
+            ///
+            /// Because a reciprocal rounds. `1/3` is not representable, so scaling by it
+            /// loses accuracy that dividing directly keeps — dividing a vector of
+            /// `6, -12, 30` by three gives exactly `2, -4, 10` here, where the
+            /// reciprocal route gives `1.9999999995` and its neighbours.
+            pub fn checked_divide(self, divisor: Fixed) -> Option<Self> {
+                Some(Self { $($component: self.$component.checked_div(divisor)?),+ })
+            }
+
             pub fn lerp(self, other: Self, t: Fixed) -> Option<Self> {
                 Some(Self { $($component: self.$component.lerp(other.$component, t)?),+ })
             }

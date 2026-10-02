@@ -2,7 +2,7 @@
 //! kept inside a group.
 
 use super::balance::Balance;
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{
@@ -324,12 +324,12 @@ impl<T: Element, const GROUPS: usize> UniqueCollection for Rota<T, GROUPS> {}
 /// elements is more likely to be drawn from, which is what keeps every element
 /// equally likely.
 impl<T: Element, const GROUPS: usize> Choose for Rota<T, GROUPS> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.is_empty() {
             return None;
         }
 
-        let mut remaining: usize = random.uniform_index(self.balance.len());
+        let mut remaining: usize = source.index_below(self.balance.len());
 
         for group in &self.groups {
             if remaining < group.len() {

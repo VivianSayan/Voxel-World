@@ -8,7 +8,8 @@
 //! - `SetAlgebra`: union, intersection, difference, subset tests.
 //! - `Choose` / `ChooseMut`: random selection and removal.
 //! - `Sequence` / `SequenceMut` / `InsertAt`: dense positions.
-//! - `Reorder`: sorting, reversing, shuffling.
+//! - `Reorder`: sorting and reversing.
+//! - `Shuffle`: putting into a random order, from any random source.
 //! - `FixedCapacity`: bounded size.
 //! - `SparseIndexed`: integer indices with gaps.
 //! - `Measured` / `MeasuredMut`: a count, weight or membership per element.
@@ -67,6 +68,8 @@ pub use priority::PriorityQueueLike;
 pub use query::RangeQuery;
 pub use readiness::Pending;
 pub use schema::{KindContract, Kinded, check_kinds};
-pub use sequence::{FixedCapacity, InsertAt, Reorder, Sequence, SequenceMut, SparseIndexed};
+pub use sequence::{
+    FixedCapacity, InsertAt, Reorder, Sequence, SequenceMut, Shuffle, SparseIndexed,
+};
 pub use stable::{StableHash, stable_hash_ordered, stable_hash_unordered};
 pub use storage::HandleStore;

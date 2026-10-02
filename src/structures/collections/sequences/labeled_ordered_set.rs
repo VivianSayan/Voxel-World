@@ -2,13 +2,12 @@
 //! lookups in both directions. It is a sequence of elements and, at the
 //! same time, a one-to-one map from element to label.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::sequences::ordered_set::OrderedSet;
 use crate::structures::mappings::single::bi_map::BiMap;
 use crate::structures::traits::{
     Choose, Collection, CollectionInsert, CollectionRemove, Element, Map, MapMut, Reorder,
-    Sequence, SequenceMut, UniqueCollection, UniqueValueMap, ValueIndexed,
-};
+    Sequence, SequenceMut, UniqueCollection, UniqueValueMap, ValueIndexed, Shuffle};
 use std::cmp::Ordering;
 
 #[derive(Clone, Debug)]
@@ -271,11 +270,11 @@ impl<T: Element, L: Element> SequenceMut for LabeledOrderedSet<T, L> {
 impl<T: Element, L: Element> UniqueCollection for LabeledOrderedSet<T, L> {}
 
 impl<T: Element, L: Element> Choose for LabeledOrderedSet<T, L> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
-        self.order.choose(random)
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.order.choose(source)
     }
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        self.order.choose_multiple(random, amount)
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        self.order.choose_multiple(source, amount)
     }
 }
 
@@ -299,9 +298,6 @@ impl<T: Element, L: Element> Reorder for LabeledOrderedSet<T, L> {
         self.order.reverse();
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        self.order.shuffle(random);
-    }
 }
 
 impl<T: Element, L: Element> Map for LabeledOrderedSet<T, L> {
@@ -412,5 +408,17 @@ impl<T: Element, L: Element> Extend<(T, L)> for LabeledOrderedSet<T, L> {
         for (item, label) in pairs {
             self.push(item, label);
         }
+    }
+}
+
+/// Delegated to the inner set, with the labels left alone: a label belongs to its
+/// element, not to the position that element happened to be in.
+impl<T: Element, L: Element> Shuffle for LabeledOrderedSet<T, L> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.order.shuffle(source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        self.order.partial_shuffle(count, source)
     }
 }

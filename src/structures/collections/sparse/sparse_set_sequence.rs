@@ -2,7 +2,7 @@
 //! share an index, and every value knows which indices hold it (see
 //! `SparseIndexed`). Empty slots are removed automatically.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::sets::set::Set;
 use crate::structures::collections::sparse::sparse_core::SparseCore;
 use crate::structures::sampling;
@@ -234,9 +234,27 @@ impl<T: Element> SparseSetSequence<T> {
         self.core.reorder(|slots| slots.reverse());
     }
 
-    /// Randomly shuffles slots across occupied indices using `random`.
-    pub fn shuffle_slots(&mut self, random: &mut Random) {
-        self.core.reorder(|slots| sampling::shuffle(slots, random));
+    /// Randomly shuffles slots across occupied indices, from any random source.
+    ///
+    /// # Why this is a named method and not [`Shuffle`](crate::structures::traits::Shuffle)
+    ///
+    /// Every other sequence here implements that trait, and this one deliberately does
+    /// not. A slot holds a whole set, so "shuffle this collection" has more than one
+    /// sensible reading:
+    ///
+    /// - move the slots around, leaving each set's contents together — this method;
+    /// - shuffle the elements *inside* each slot;
+    /// - redistribute elements across slots entirely.
+    ///
+    /// A trait method would have to pick one, and a caller who wanted another would
+    /// silently get the wrong thing. Naming it says which one happened, so the
+    /// ambiguity is settled at the call site, where the caller is the one who knows.
+    ///
+    /// The sibling [`SparseSequence`](super::sparse_sequence::SparseSequence) holds one
+    /// element per slot, so for it there is only one reading, and it does implement the
+    /// trait.
+    pub fn shuffle_slots<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.core.reorder(|slots| sampling::shuffle(slots, source));
     }
 
     /// True when this sequence's slots appear consecutively, in order, in

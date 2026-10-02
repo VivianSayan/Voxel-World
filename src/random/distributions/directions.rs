@@ -9,7 +9,7 @@
 use super::{Distribution, PortableDistribution};
 use crate::math::linear::{Vector2, Vector3, Vector4};
 use crate::math::{Quaternion, UnitQuaternion};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 
 /// A point drawn uniformly from the whole of the unit disc, not its rim.
 ///
@@ -61,7 +61,7 @@ pub struct UnitHypersphere;
 impl Distribution for UnitDisc {
     type Output = Vector2<f64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vector2<f64> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vector2<f64> {
         let (x, y, _): (f64, f64, f64) = disc_point(source);
 
         Vector2::new(x, y)
@@ -71,7 +71,7 @@ impl Distribution for UnitDisc {
 impl Distribution for UnitBall {
     type Output = Vector3<f64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vector3<f64> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vector3<f64> {
         let direction: Vector3<f64> = UnitSphere.sample(source);
         let radius: f64 = source.unit_f64().cbrt();
 
@@ -82,7 +82,7 @@ impl Distribution for UnitBall {
 impl Distribution for UnitCircle {
     type Output = Vector2<f64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vector2<f64> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vector2<f64> {
         let (u, v, square_radius): (f64, f64, f64) = disc_point(source);
         let scale: f64 = 1.0 / square_radius.sqrt();
 
@@ -93,7 +93,7 @@ impl Distribution for UnitCircle {
 impl Distribution for UnitSphere {
     type Output = Vector3<f64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vector3<f64> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vector3<f64> {
         let (u, v, square_radius): (f64, f64, f64) = disc_point(source);
         let factor: f64 = 2.0 * (1.0 - square_radius).sqrt();
 
@@ -104,7 +104,7 @@ impl Distribution for UnitSphere {
 impl Distribution for UnitHypersphere {
     type Output = Vector4<f64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vector4<f64> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vector4<f64> {
         let (x, y, first_square_radius): (f64, f64, f64) = disc_point(source);
         let (z, w, second_square_radius): (f64, f64, f64) = disc_point(source);
 
@@ -129,7 +129,7 @@ impl PortableDistribution for UnitHypersphere {}
 /// The origin is rejected along with the corners, so callers are free to
 /// divide by the radius. The ones that do not lose a region of measure zero by
 /// it.
-fn disc_point<S: RandomSource + ?Sized>(source: &mut S) -> (f64, f64, f64) {
+fn disc_point<S: StochasticSource + ?Sized>(source: &mut S) -> (f64, f64, f64) {
     loop {
         let u: f64 = 2.0 * source.unit_f64() - 1.0;
         let v: f64 = 2.0 * source.unit_f64() - 1.0;
@@ -163,7 +163,7 @@ pub struct UniformRotation;
 impl Distribution for UniformRotation {
     type Output = UnitQuaternion;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> UnitQuaternion {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> UnitQuaternion {
         let point: Vector4<f64> = UnitHypersphere.sample(source);
 
         UnitQuaternion::new(Quaternion::new(point.x, point.y, point.z, point.w))

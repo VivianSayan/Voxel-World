@@ -11,7 +11,7 @@
 //! [`WeightedSet`]: super::weighted_set::WeightedSet
 //! [`FuzzySet`]: super::fuzzy_set::FuzzySet
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::structures::sampling;
 use crate::structures::traits::Element;
@@ -111,9 +111,9 @@ impl<T, N: TallyValue> Tally<T, N> {
     /// them before drawing. Allocates two lists, so
     /// [`Tally::choose_one_weighted`] is the better choice for a single
     /// pick.
-    pub fn choose_weighted(
+    pub fn choose_weighted<S: StochasticSource + ?Sized>(
         &self,
-        random: &mut Random,
+        source: &mut S,
         amount: usize,
         to_weight: impl Fn(N) -> f64,
         adjust: impl FnOnce(&mut [f64]),
@@ -127,7 +127,7 @@ impl<T, N: TallyValue> Tally<T, N> {
             .map(|(item, value)| (item, to_weight(*value)))
             .unzip();
         adjust(&mut values);
-        sampling::weighted_indices(&values, amount, random)
+        sampling::weighted_indices(&values, amount, source)
             .into_iter()
             .map(|index| items[index])
             .collect()
@@ -141,9 +141,9 @@ impl<T, N: TallyValue> Tally<T, N> {
     /// rather than one. `None` when nothing has a positive finite weight.
     /// Should rounding carry the target past the end, the last element that
     /// could have been chosen is returned.
-    pub fn choose_one_weighted(
+    pub fn choose_one_weighted<S: StochasticSource + ?Sized>(
         &self,
-        random: &mut Random,
+        source: &mut S,
         to_weight: impl Fn(N) -> f64,
     ) -> Option<&T> {
         let maximum = self
@@ -157,7 +157,7 @@ impl<T, N: TallyValue> Tally<T, N> {
             .iter()
             .map(|(_, value)| to_weight(value) / maximum)
             .sum();
-        let mut target = random.unit_value().value() * total;
+        let mut target = source.unit_f64() * total;
         let mut last = None;
         for (item, value) in self.iter() {
             let weight = to_weight(value) / maximum;

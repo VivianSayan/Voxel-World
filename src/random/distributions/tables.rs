@@ -3,7 +3,7 @@
 use super::continuous::Gamma;
 use super::exact::chance_fraction;
 use super::{Distribution, PortableDistribution};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::units::{UnitValue, Weights};
 use crate::units::Unit;
 
@@ -14,7 +14,7 @@ use crate::units::Unit;
 impl Distribution for Weights {
     type Output = usize;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> usize {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> usize {
         self.index_for(UnitValue::new(source.unit_f64()).unwrap())
     }
 }
@@ -98,7 +98,7 @@ impl Categorical {
 impl Distribution for Categorical {
     type Output = usize;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> usize {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> usize {
         let column: usize = source.bounded_u64(self.probability.len() as u64) as usize;
         if self.probability[column].decide_from(source) {
             column
@@ -193,7 +193,7 @@ impl IntegerCategorical {
 impl Distribution for IntegerCategorical {
     type Output = usize;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> usize {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> usize {
         let column: usize = source.bounded_u64(self.threshold.len() as u64) as usize;
         if chance_fraction(source, self.threshold[column], self.total) {
             column
@@ -237,12 +237,12 @@ impl<T> WeightedDiscrete<T> {
 
     /// One draw, as a position in [`WeightedDiscrete::values`], for a caller
     /// that wants the index rather than the value.
-    pub fn sample_index<S: RandomSource + ?Sized>(&self, source: &mut S) -> usize {
+    pub fn sample_index<S: StochasticSource + ?Sized>(&self, source: &mut S) -> usize {
         self.table.sample(source)
     }
 
     /// One value, drawn in proportion to its weight.
-    pub fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> &T {
+    pub fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> &T {
         &self.values[self.table.sample(source)]
     }
 }
@@ -281,7 +281,7 @@ impl Dirichlet {
 impl Distribution for Dirichlet {
     type Output = Option<Weights>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Option<Weights> {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<Weights> {
         let drawn: Vec<f64> = self
             .concentrations
             .iter()

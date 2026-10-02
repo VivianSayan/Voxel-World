@@ -62,6 +62,7 @@
 pub mod wide_integer;
 pub mod wide_float;
 pub(crate) mod cordic;
+pub mod decimal;
 pub mod big_float;
 pub mod big_integer;
 pub mod fixed;
@@ -81,6 +82,7 @@ pub use wide_integer::{WideInt, WideUint};
 pub use wide_float::WideFloat;
 pub use big_float::BigFloat;
 pub use big_integer::{BigInt, BigUint, ParseBigError};
+pub use decimal::{Decimal, DecimalError};
 pub use fixed::{Fixed, FixedPoint};
 pub use hypercomplex::{Complex, Dual, Quaternion, SplitComplex, SplitQuaternion};
 pub use interval::{Interval, IntervalSet};

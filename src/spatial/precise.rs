@@ -364,17 +364,14 @@ impl PrecisePosition3 {
         self.0.checked_sub(other.0)
     }
 
-    /// This position after `ticks` steps at a constant velocity, in one
-    /// operation rather than a loop. `None` on overflow.
-    ///
-    /// Identical to offsetting that many times, since neither the scaling nor
-    /// the addition rounds. In floating point the two would differ, and the
-    /// difference would grow with the number of ticks.
-    pub fn advanced_by(self, velocity: Vector3<Fixed>, ticks: u64) -> Option<Self> {
-        let steps: Fixed = Fixed::from_integer_i128(ticks as i128)?;
-
-        self.checked_offset(velocity.checked_scale(steps)?)
-    }
+    // Moving a position now lives in `kinematics` as `PrecisePosition3::moved_by`,
+    // which takes a `Velocity3` and a real `Seconds`.
+    //
+    // It used to be `advanced_by(velocity, TickDuration)`, which multiplied a bare
+    // vector by a count of ticks. That only makes sense if the velocity is *per tick*,
+    // and a velocity is per second — a count of ticks becomes a number of seconds only
+    // once a `TickRate` says so. The replacement cannot be written with the wrong
+    // quantity in either argument.
 
     /// The squared distance to another position, which is what to compare
     /// against a squared radius. `None` on overflow, which a separation beyond

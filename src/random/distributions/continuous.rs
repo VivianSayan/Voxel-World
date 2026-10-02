@@ -1,7 +1,7 @@
 //! Real-valued distributions.
 
 use super::{Distribution, PortableDistribution};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::units::Rate;
 use std::f64::consts::{E, PI};
 
@@ -9,7 +9,7 @@ const SQRT_TAU: f64 = 2.506_628_274_631_000_5;
 
 /// A distribution over `f64` parameters: the struct, a `new` that rejects
 /// non-finite or invalid parameters, and the sampler. Inside `$body` each
-/// parameter is bound by name and `$source` is the [`RandomSource`].
+/// parameter is bound by name and `$source` is the [`StochasticSource`].
 macro_rules! distribution {
     (
         $(#[$meta:meta])*
@@ -37,7 +37,7 @@ macro_rules! distribution {
         impl Distribution for $name {
             type Output = f64;
 
-            fn sample<S: RandomSource + ?Sized>(&self, $source: &mut S) -> f64 {
+            fn sample<S: StochasticSource + ?Sized>(&self, $source: &mut S) -> f64 {
                 let Self { $($parameter),+ } = *self;
                 $body
             }
@@ -221,7 +221,7 @@ impl Exponential {
 impl Distribution for Exponential {
     type Output = f64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> f64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> f64 {
         -source.open_unit_f64().ln() / self.rate.value()
     }
 }
@@ -230,7 +230,7 @@ impl Distribution for Exponential {
 // Shared algorithms
 // ---------------------------------------------------------------------------
 
-fn uniform<S: RandomSource + ?Sized>(source: &mut S, low: f64, high: f64) -> f64 {
+fn uniform<S: StochasticSource + ?Sized>(source: &mut S, low: f64, high: f64) -> f64 {
     if low == high {
         return low;
     }
@@ -243,7 +243,7 @@ fn uniform<S: RandomSource + ?Sized>(source: &mut S, low: f64, high: f64) -> f64
 ///
 /// Normals come in pairs; the second goes to the source to keep, if it keeps
 /// one, and is handed back by the next call.
-pub(in crate::random) fn standard_normal<S: RandomSource + ?Sized>(source: &mut S) -> f64 {
+pub(in crate::random) fn standard_normal<S: StochasticSource + ?Sized>(source: &mut S) -> f64 {
     if let Some(spare) = source.take_spare_normal() {
         return spare;
     }
@@ -267,7 +267,7 @@ pub(in crate::random) fn standard_normal<S: RandomSource + ?Sized>(source: &mut 
 /// mass, so plain rejection, drawing normals until one lands inside, is cheap.
 /// A narrow one would reject far too often, so it draws uniformly across the
 /// interval and accepts against the normal's own density instead.
-fn truncated_normal_centered<S: RandomSource + ?Sized>(source: &mut S, a: f64, b: f64) -> f64 {
+fn truncated_normal_centered<S: StochasticSource + ?Sized>(source: &mut S, a: f64, b: f64) -> f64 {
     if b - a >= SQRT_TAU {
         loop {
             let z: f64 = standard_normal(source);
@@ -293,7 +293,7 @@ fn truncated_normal_centered<S: RandomSource + ?Sized>(source: &mut S, a: f64, b
 /// efficient. For a longer or unbounded one, the proposal is an exponential
 /// started at `a` with the rate that maximises the acceptance rate, which is
 /// what keeps the cost flat however far out the interval lies.
-fn truncated_normal_tail<S: RandomSource + ?Sized>(source: &mut S, a: f64, b: f64) -> f64 {
+fn truncated_normal_tail<S: StochasticSource + ?Sized>(source: &mut S, a: f64, b: f64) -> f64 {
     let root: f64 = (a * a + 4.0).sqrt();
     let uniform_limit: f64 = a + 2.0 * E.sqrt() / (a + root) * ((a * a - a * root) / 4.0).exp();
 
@@ -326,7 +326,7 @@ fn truncated_normal_tail<S: RandomSource + ?Sized>(source: &mut S, a: f64, b: f6
 /// uniform draw is raised to a power here. Everything is kept in log space so
 /// that a very small shape, where that power is enormous, cannot underflow the
 /// sample to zero before it is used.
-fn ln_standard_gamma<S: RandomSource + ?Sized>(source: &mut S, shape: f64) -> f64 {
+fn ln_standard_gamma<S: StochasticSource + ?Sized>(source: &mut S, shape: f64) -> f64 {
     if shape < 1.0 {
         return standard_gamma_large(source, shape + 1.0).ln()
             + source.open_unit_f64().ln() / shape;
@@ -339,7 +339,7 @@ fn ln_standard_gamma<S: RandomSource + ?Sized>(source: &mut S, shape: f64) -> f6
 /// Squeezes a normal draw through a cubed transform whose shape matches the
 /// gamma's, then accepts against the remaining difference. Accepts well over
 /// nine times in ten for any shape, so the loop almost never runs twice.
-fn standard_gamma_large<S: RandomSource + ?Sized>(source: &mut S, shape: f64) -> f64 {
+fn standard_gamma_large<S: StochasticSource + ?Sized>(source: &mut S, shape: f64) -> f64 {
     let d: f64 = shape - 1.0 / 3.0;
     let spread: f64 = 1.0 / (3.0 * d.sqrt());
 

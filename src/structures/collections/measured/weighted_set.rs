@@ -4,7 +4,7 @@
 //! Set algebra keeps the larger weight (union) or the smaller
 //! (intersection); `+` adds weights.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::measured::multi_set::MultiSet;
 use crate::structures::collections::measured::tally::Tally;
 use crate::structures::traits::operators::impl_set_operators;
@@ -282,24 +282,24 @@ impl<T: Element> MeasuredMut for WeightedSet<T> {
 /// Picks elements in proportion to their linear weight. Non-positive
 /// weights are never picked.
 impl<T: Element> Choose for WeightedSet<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
-        self.tally.choose_one_weighted(random, |weight| weight)
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.tally.choose_one_weighted(source, |weight| weight)
     }
 
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
         self.tally
-            .choose_weighted(random, amount, |value| value, |_| {})
+            .choose_weighted(source, amount, |value| value, |_| {})
     }
 }
 
 /// Weighted by the stored weight, which is what the type is for.
 impl<T: Element> WeightedChoose for WeightedSet<T> {
-    fn choose_weighted(&self, random: &mut Random) -> Option<&T> {
-        self.choose(random)
+    fn choose_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.choose(source)
     }
 
-    fn choose_multiple_weighted(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        self.choose_multiple(random, amount)
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        self.choose_multiple(source, amount)
     }
 
     fn weighted_chance_of(&self, item: &T) -> Probability {

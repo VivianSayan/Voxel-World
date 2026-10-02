@@ -5,7 +5,7 @@
 //! distributions are in [`exact`](super::exact).
 
 use super::{Distribution, PortableDistribution};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::units::{Probability, Rate, Ratio};
 use crate::units::Unit;
 use std::f64::consts::PI;
@@ -40,7 +40,7 @@ impl UniformU64 {
 impl Distribution for UniformU64 {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         if self.span == u64::MAX {
             return source.next_u64();
         }
@@ -70,7 +70,7 @@ impl UniformI64 {
 impl Distribution for UniformI64 {
     type Output = i64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> i64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> i64 {
         if self.span == u64::MAX {
             return source.next_u64() as i64;
         }
@@ -137,7 +137,7 @@ impl Bernoulli {
 impl Distribution for Bernoulli {
     type Output = bool;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> bool {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> bool {
         self.chance.decide_from(source)
     }
 }
@@ -171,7 +171,7 @@ impl Binomial {
 impl Distribution for Binomial {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let trials: u64 = self.trials;
         let p: f64 = self.chance.value();
 
@@ -204,7 +204,7 @@ impl Distribution for Binomial {
 /// Walks the distribution from zero, subtracting each outcome's probability
 /// from the draw until it runs out. The whole walk restarts on the rare
 /// occasion that accumulated rounding carries it past the last outcome.
-fn binomial_inversion<S: RandomSource + ?Sized>(source: &mut S, trials: u64, p: f64) -> u64 {
+fn binomial_inversion<S: StochasticSource + ?Sized>(source: &mut S, trials: u64, p: f64) -> u64 {
     let q: f64 = 1.0 - p;
     let ratio: f64 = p / q;
     let a: f64 = (trials + 1) as f64 * ratio;
@@ -229,7 +229,7 @@ fn binomial_inversion<S: RandomSource + ?Sized>(source: &mut S, trials: u64, p: 
 }
 
 /// Transformed rejection with squeeze (Hörmann, 1993), for trials * p >= 10.
-fn binomial_btrs<S: RandomSource + ?Sized>(source: &mut S, trials: u64, p: f64) -> u64 {
+fn binomial_btrs<S: StochasticSource + ?Sized>(source: &mut S, trials: u64, p: f64) -> u64 {
     let n: f64 = trials as f64;
     let q: f64 = 1.0 - p;
     let spq: f64 = (n * p * q).sqrt();
@@ -287,7 +287,7 @@ impl Poisson {
 impl Distribution for Poisson {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let lambda: f64 = self.mean.value();
 
         if lambda < 10.0 {
@@ -298,7 +298,7 @@ impl Distribution for Poisson {
     }
 }
 
-fn poisson_inversion<S: RandomSource + ?Sized>(source: &mut S, lambda: f64) -> u64 {
+fn poisson_inversion<S: StochasticSource + ?Sized>(source: &mut S, lambda: f64) -> u64 {
     'retry: loop {
         let u: f64 = source.unit_f64();
         let mut probability: f64 = (-lambda).exp();
@@ -319,7 +319,7 @@ fn poisson_inversion<S: RandomSource + ?Sized>(source: &mut S, lambda: f64) -> u
 }
 
 /// Transformed rejection (Hörmann, 1993), for lambda >= 10.
-fn poisson_ptrs<S: RandomSource + ?Sized>(source: &mut S, lambda: f64) -> u64 {
+fn poisson_ptrs<S: StochasticSource + ?Sized>(source: &mut S, lambda: f64) -> u64 {
     let sqrt_lambda: f64 = lambda.sqrt();
     let ln_lambda: f64 = lambda.ln();
     let b: f64 = 0.931 + 2.53 * sqrt_lambda;
@@ -376,7 +376,7 @@ impl StochasticRound {
 impl Distribution for StochasticRound {
     type Output = i64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> i64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> i64 {
         let floor: f64 = self.value.floor();
         let fraction: f64 = self.value - floor;
         // The fractional part is exactly the chance of rounding up, so this is a
@@ -423,7 +423,7 @@ impl Geometric {
 impl Distribution for Geometric {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let p: f64 = self.chance.value();
 
         if p >= 1.0 {
@@ -486,7 +486,7 @@ impl GeometricRatio {
 impl Distribution for GeometricRatio {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         match &self.inverse {
             Some(inverse) => inverse.sample(source),
             None => geometric_ratio(source, self.chance),
@@ -506,7 +506,7 @@ impl PortableDistribution for GeometricRatio {}
 /// Past that limit the two swap places and never swap back, since counting
 /// grows with the answer and inverting does not, so a rarer chance builds a
 /// table and inverts.
-pub(in crate::random) fn geometric_ratio<S: RandomSource + ?Sized>(
+pub(in crate::random) fn geometric_ratio<S: StochasticSource + ?Sized>(
     source: &mut S,
     chance: Ratio,
 ) -> u64 {
@@ -534,7 +534,7 @@ pub(in crate::random) fn geometric_ratio<S: RandomSource + ?Sized>(
 }
 
 /// [`geometric_ratio`] at one in `count`, skipping the ratio's checks.
-pub(in crate::random) fn geometric_one_in<S: RandomSource + ?Sized>(
+pub(in crate::random) fn geometric_one_in<S: StochasticSource + ?Sized>(
     source: &mut S,
     count: u64,
 ) -> u64 {
@@ -567,7 +567,7 @@ pub(in crate::random) fn geometric_one_in<S: RandomSource + ?Sized>(
 /// Folding a word means or-ing it onto itself shifted right, less than a full
 /// slice at a time, so no slice can ever be marked by its neighbour's bits. A
 /// slice left clear is a success, and the lowest clear one is the first.
-fn geometric_in_power_of_two<S: RandomSource + ?Sized>(source: &mut S, bits: u32) -> u64 {
+fn geometric_in_power_of_two<S: StochasticSource + ?Sized>(source: &mut S, bits: u32) -> u64 {
     debug_assert!((1..64).contains(&bits));
 
     let per_word: u32 = u64::BITS / bits;
@@ -616,7 +616,7 @@ fn geometric_in_power_of_two<S: RandomSource + ?Sized>(source: &mut S, bits: u32
 ///
 /// A denominator past half the range leaves no room to pack more than one trial
 /// per word, so that case falls back to a whole bounded draw per trial.
-fn geometric_by_chunks<S: RandomSource + ?Sized>(
+fn geometric_by_chunks<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u64,
     denominator: u64,
@@ -689,7 +689,7 @@ impl GeometricInverse {
         Self { powers, levels }
     }
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let draw: u128 = source.next_u64() as u128;
         let mut survived: u128 = 1u128 << 64;
         let mut failures: u64 = 0;
@@ -769,7 +769,7 @@ impl Zipf {
 impl Distribution for Zipf {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         loop {
             let u: f64 =
                 self.h_integral_n + source.unit_f64() * (self.h_integral_x1 - self.h_integral_n);

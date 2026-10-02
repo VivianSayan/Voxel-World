@@ -5,12 +5,11 @@
 //! Method names follow `VecDeque`: the front is the oldest value and the
 //! back the newest.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::sampling;
 use crate::structures::traits::{
     Bounded, Choose, Collection, CollectionRemove, EvictingInsert, FixedCapacity, Reorder,
-    Sequence, SequenceMut,
-};
+    Sequence, SequenceMut, Shuffle};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -207,14 +206,14 @@ impl<T: PartialEq> CollectionRemove for RingBuffer<T> {
 }
 
 impl<T: PartialEq> Choose for RingBuffer<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.values.is_empty() {
             return None;
         }
-        self.values.get(random.uniform_index(self.values.len()))
+        self.values.get(source.index_below(self.values.len()))
     }
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        sampling::uniform_indices(self.values.len(), amount, Some(random))
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        sampling::uniform_indices(self.values.len(), amount, Some(source))
             .into_iter()
             .map(|index| &self.values[index])
             .collect()
@@ -286,9 +285,6 @@ impl<T: PartialEq> Reorder for RingBuffer<T> {
         self.values.make_contiguous().reverse();
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        sampling::shuffle(self.values.make_contiguous(), random);
-    }
 }
 
 /// Buffers are equal when they hold the same values in the same order,
@@ -354,5 +350,16 @@ impl<'a, T> IntoIterator for &'a RingBuffer<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.values.iter()
+    }
+}
+
+/// The ring is made contiguous first, so the shuffle sees one run of values.
+impl<T> Shuffle for RingBuffer<T> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        sampling::shuffle(self.values.make_contiguous(), source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        sampling::partial_shuffle(self.values.make_contiguous(), count, source)
     }
 }

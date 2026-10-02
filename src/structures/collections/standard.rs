@@ -18,12 +18,11 @@
 //! seed wants `FastHashMap` and `FastHashSet` from `hashing` instead, which are
 //! the same types with a deterministic hasher.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::sampling;
 use crate::structures::traits::{
     Choose, Collection, CollectionInsert, CollectionRemove, InsertAt, Reorder, Sequence,
-    SequenceMut,
-};
+    SequenceMut, Shuffle};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
@@ -115,9 +114,6 @@ impl<T: PartialEq> Reorder for Vec<T> {
         <[T]>::reverse(self);
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        sampling::shuffle(self, random);
-    }
 }
 
 /// Indexed directly: one draw for one pick, rather than the trait's default of
@@ -130,16 +126,16 @@ impl<T: PartialEq> Reorder for Vec<T> {
 /// `ChooseMut` arrives on its own: the module blanket-implements it for any
 /// `Choose + CollectionRemove` whose items clone.
 impl<T: PartialEq> Choose for Vec<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.is_empty() {
             return None;
         }
 
-        <[T]>::get(self, random.uniform_index(self.len()))
+        <[T]>::get(self, source.index_below(self.len()))
     }
 
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        sampling::uniform_indices(self.len(), amount, Some(random))
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        sampling::uniform_indices(self.len(), amount, Some(source))
             .into_iter()
             .map(|index| &self[index])
             .collect()
@@ -230,25 +226,33 @@ impl<T: PartialEq> Reorder for VecDeque<T> {
         self.make_contiguous().reverse();
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        sampling::shuffle(self.make_contiguous(), random);
-    }
 }
 
 /// Indexed directly, for the same reasons as `Vec`.
 impl<T: PartialEq> Choose for VecDeque<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.is_empty() {
             return None;
         }
 
-        VecDeque::get(self, random.uniform_index(self.len()))
+        VecDeque::get(self, source.index_below(self.len()))
     }
 
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        sampling::uniform_indices(self.len(), amount, Some(random))
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        sampling::uniform_indices(self.len(), amount, Some(source))
             .into_iter()
             .map(|index| &self[index])
             .collect()
+    }
+}
+
+/// Made contiguous first, because a deque's two halves cannot be swapped across.
+impl<T> Shuffle for VecDeque<T> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        sampling::shuffle(self.make_contiguous(), source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        sampling::partial_shuffle(self.make_contiguous(), count, source)
     }
 }

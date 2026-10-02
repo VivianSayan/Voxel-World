@@ -4,9 +4,11 @@
 //! derivation value: the same seed always gives the same answer. A
 //! [`SeedCursor`] is the compact advancing counterpart. Every sampler in
 //! [`distributions`] works with these sources through [`Random::sample`],
-//! [`Seed::sample`], or [`DrawSource::draw`].
+//! [`Seed::sample`], or [`StochasticStream::draw`].
 
 pub mod bit_permuter;
+pub mod bulk_pick;
+pub mod fixed_point;
 mod generator;
 pub mod unit;
 mod questions;
@@ -20,12 +22,17 @@ pub use approximation::{
     Approximation, BinomialAlgorithm, HypergeometricAlgorithm, PoissonAlgorithm,
     PoissonBinomialAlgorithm,
 };
+pub use bulk_pick::{
+    BulkError, BulkPickEntry, BulkPickResult, BulkPickTable, Count, CountDistribution, Quantity,
+    QuantityDistribution, bulk_pick,
+};
 pub use distributions::*;
+pub use fixed_point::{UniformFixed, UniformFixedRange};
 pub use seed::{
     SEED_ALGORITHM_VERSION, Seed, SeedCursor, SeedDomain, SeedInteger, SeedablePosition,
     domain_tag,
 };
-pub use source::{DrawSource, EventRandom, RandomSource};
+pub use source::{StochasticStream, EventRandom, StochasticSource};
 
 
 pub use generator::{

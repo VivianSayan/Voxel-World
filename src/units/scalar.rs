@@ -17,7 +17,7 @@ use crate::math::rational::Ratio;
 use crate::random::seed::Seed;
 use crate::math::Unit;
 use crate::random::distributions::{Distribution, PortableDistribution};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use std::fmt;
 
 /// The largest `f64` below 1.0, which is where a value at the top of a
@@ -536,7 +536,7 @@ pub struct UniformProbability;
 impl Distribution for UniformProbability {
     type Output = Probability;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Probability {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Probability {
         source.unit().to_probability()
     }
 }
@@ -555,7 +555,7 @@ pub struct UniformNoise;
 impl Distribution for UniformNoise {
     type Output = NoiseValue;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> NoiseValue {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> NoiseValue {
         // `to_unit_value` cannot fail: the draw is half-open, so never one.
         source
             .unit()

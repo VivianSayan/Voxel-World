@@ -5,14 +5,13 @@
 //! Method names follow `Vec` and the `indexmap` crate's `IndexSet`.
 //! Sorting, reversing and shuffling come from `Reorder`.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::structures::sampling;
 use crate::structures::traits::operators::impl_set_operators;
 use crate::structures::traits::{
     Capacity, Choose, Collection, CollectionInsert, CollectionRemove, Element, InsertAt, Reorder,
-    Sequence, SequenceMut, SetAlgebra, UniqueCollection,
-};
+    Sequence, SequenceMut, SetAlgebra, UniqueCollection, Shuffle};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
@@ -396,14 +395,14 @@ impl<T: Element> CollectionRemove for OrderedSet<T> {
 impl<T: Element> UniqueCollection for OrderedSet<T> {}
 
 impl<T: Element> Choose for OrderedSet<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.items.is_empty() {
             return None;
         }
-        self.items.get(random.uniform_index(self.items.len()))
+        self.items.get(source.index_below(self.items.len()))
     }
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        sampling::uniform_indices(self.items.len(), amount, Some(random))
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        sampling::uniform_indices(self.items.len(), amount, Some(source))
             .into_iter()
             .map(|index| &self.items[index])
             .collect()
@@ -457,9 +456,6 @@ impl<T: Element> Reorder for OrderedSet<T> {
         self.reorder(|items| items.reverse());
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        self.reorder(|items| sampling::shuffle(items, random));
-    }
 }
 
 /// Results keep this set's order, with new members from `other` after.
@@ -566,5 +562,21 @@ impl<T: Element + std::fmt::Display> std::fmt::Display for OrderedSet<T> {
         }
 
         formatter.write_str("]")
+    }
+}
+
+/// Reordered in place, rebuilding the member-to-position index afterwards —
+/// a shuffled set still has to be able to find its members.
+impl<T: Element> Shuffle for OrderedSet<T> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.reorder(|items| sampling::shuffle(items, source));
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        let mut filled: usize = 0;
+
+        self.reorder(|items| filled = sampling::partial_shuffle(items, count, source));
+
+        filled
     }
 }

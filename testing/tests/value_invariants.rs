@@ -115,14 +115,21 @@ fn coordinate_conversions_hold_at_negative_and_extreme_positions() {
 #[test]
 fn typed_time_and_scheduler_agree() {
     assert!(TickRate::new(0).is_none());
-    assert!(Seconds::new(-1.0).is_none());
-    assert!(Seconds::new(f64::INFINITY).is_none());
+
+    // `Seconds` is fixed-point now, so negative time is refused at construction and
+    // there is no infinity to reject.
+    assert!(Seconds::from_seconds(-1).is_none());
+    assert!(Seconds::from_fixed(voxel_world::math::Fixed::from_integer(-1)).is_none());
+
     let rate = TickRate::new(20).unwrap();
     assert_eq!(
-        rate.ticks_in(Seconds::new(2.5).unwrap()),
+        rate.ticks_in(Seconds::from_millis(2_500).unwrap()),
         TickDuration::new(50)
     );
-    assert_eq!(rate.seconds_in(TickDuration::new(50)).value(), 2.5);
+    assert_eq!(
+        rate.seconds_in(TickDuration::new(50)),
+        Seconds::from_millis(2_500).unwrap(),
+    );
     let start = Tick::new(100);
     assert_eq!((start + TickDuration::new(3)) - start, TickDuration::new(3));
     let mut schedule = TickScheduler::starting_at(start);

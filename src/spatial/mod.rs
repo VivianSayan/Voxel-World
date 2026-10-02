@@ -12,9 +12,14 @@ pub mod measure;
 pub mod morton;
 pub mod noise;
 pub mod position;
+pub mod kinematics;
 pub mod precise;
 
 pub use depth::{Depth, TreeDepth};
+pub use kinematics::{
+    Acceleration2, Acceleration3, Acceleration4, Displacement2, Displacement3, Displacement4,
+    Force2, Force3, Force4, Mass, Velocity2, Velocity3, Velocity4,
+};
 pub use measure::WorldUnits;
 pub use morton::MortonKey;
 pub use position::{

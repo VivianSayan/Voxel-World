@@ -1,24 +1,50 @@
-//! Where random bits come from, kept apart from what is done with them.
+//! Where stochastic draws come from, kept apart from what is done with them.
 //!
-//! Every sampler in [`distributions`](super::distributions) asks only for a
-//! [`RandomSource`]: something that hands out 64 uniform bits at a time. Two
-//! things do:
+//! # Two traits, and the difference between them
 //!
-//! - [`Random`], a stream that moves on after every draw, for
-//!   anything that wants a run of different values.
-//! - a [`Seed`], through [`Seed::sample`]: a temporary cursor that
-//!   starts at the seed and lasts one call, so the same seed always answers the
-//!   same, however many words the answer takes.
+//! | | [`StochasticSource`] | [`StochasticStream`] |
+//! |---|---|---|
+//! | Who holds it | an algorithm **borrows** it for one call | an owner **keeps** it between calls |
+//! | What it answers | "give me words, bounded integers, fractions" | "draw me a value from this distribution" |
+//! | Lifetime | as long as the `&mut` borrow | as long as the thing that owns it |
+//! | Can be built from a seed | no, it already exists | yes, [`StochasticStream::from_seed`] |
 //!
-//! [`Seed::sample`]: super::seed::Seed::sample
+//! Everything in [`distributions`](super::distributions), every shuffle and the
+//! bulk picker ask only for a [`StochasticSource`]: 64 uniform bits at a time, plus
+//! the few helpers below that turn those bits into fractions and bounded integers.
+//! Keeping those helpers in one place is what stops two sources drifting apart on how
+//! it is done.
 //!
-//! The helpers below are the only places the raw bits are turned into
-//! fractions and bounded integers, so the two sources cannot drift apart on
-//! how that is done.
+//! [`StochasticStream`] is a different capability, not a bigger one. A scheduler
+//! entry, a component on an entity, anything that has to come back later and roll
+//! again without a generator being handed to it — those **store** their randomness,
+//! and that is what this trait describes. It is also why it carries `from_seed`: a
+//! holder usually wants one made rather than supplied.
 //!
-//! [`DrawSource`] is the other half of the story: randomness that something
-//! *keeps* and advances itself, rather than randomness a sampler borrows.
+//! # What implements which
+//!
+//! - [`Random`] — a stream that moves on after every draw. Both traits.
+//! - [`SeedCursor`] — a deterministic position that advances past each word it
+//!   reads. Both traits.
+//! - [`Seed`] — **neither**, deliberately. A seed is an immutable question, not a
+//!   stream; it hands out a temporary cursor through [`Seed::cursor`] and keeps no
+//!   state of its own. That is what makes the same seed answer the same, for ever.
+//!
+//! [`Seed::cursor`]: super::seed::Seed::cursor
+//!
+//! # Why these names
+//!
+//! `StochasticSource` was `RandomSource`, which read as though it belonged to
+//! [`Random`] — yet [`SeedCursor`] implements it just as fully, and a seeded world
+//! uses that path far more. `Stochastic` names the capability rather than one of its
+//! two providers.
+//!
+//! `StochasticStream` was `DrawSource`, which said nothing about how it differed from
+//! the other one. *Source* against *stream* carries the distinction in the names: a
+//! source is borrowed, a stream is owned and advances. It is also the word the crate
+//! already used in prose for exactly this.
 
+use crate::math::fixed::Fixed;
 use crate::random::Random;
 use crate::random::distributions::Distribution;
 use crate::random::seed::{Seed, SeedCursor};
@@ -26,10 +52,10 @@ use crate::units::Unit;
 
 /// Anything that produces uniform 64-bit words.
 ///
-/// Only [`RandomSource::next_u64`] has to be written; the rest are built on it
+/// Only [`StochasticSource::next_u64`] has to be written; the rest are built on it
 /// and should be left alone, since every sampler relies on them consuming
 /// exactly the draws they do.
-pub trait RandomSource {
+pub trait StochasticSource {
     /// Uniform over every `u64`.
     fn next_u64(&mut self) -> u64;
 
@@ -37,10 +63,10 @@ pub trait RandomSource {
     ///
     /// The integer-backed fraction, and the one to prefer for a decision: comparing
     /// against a [`Unit`] chance is exact to the last bit, where the 53-bit
-    /// [`RandomSource::unit_f64`] grid rounds the effective probability by up to
+    /// [`StochasticSource::unit_f64`] grid rounds the effective probability by up to
     /// `2^-53`. It also costs no more — one word either way.
     ///
-    /// [`RandomSource::unit_f64`] remains the right call when the fraction is about
+    /// [`StochasticSource::unit_f64`] remains the right call when the fraction is about
     /// to be fed to `ln`, `powf` or the like, which is most of the continuous
     /// samplers: those need a float in the end and going through a `Unit` would only
     /// add a conversion.
@@ -88,6 +114,85 @@ pub trait RandomSource {
         (product >> 64) as u64
     }
 
+    /// A uniform `u128` below `range`, with no bias. `range` must not be zero.
+    ///
+    /// # Why this is not [`StochasticSource::bounded_u64`] widened
+    ///
+    /// Lemire's method needs the high half of a `range × word` product, which at 128
+    /// bits means a 256-bit multiply. The crate has one, but it lives inside the
+    /// fixed-point implementation as a detail of that type, and reaching into it from
+    /// here would tie two unrelated parts of the crate together for a function that
+    /// is rarely hot.
+    ///
+    /// So this masks instead: it draws the fewest bits that can hold `range - 1` and
+    /// tries again on a value at or above it. That is unbiased for the same reason
+    /// rejection always is — every accepted value was equally likely — and it accepts
+    /// at least half the time, so it averages under two attempts.
+    fn bounded_u128(&mut self, range: u128) -> u128 {
+        assert!(range > 0, "a bounded random range must be non-zero");
+
+        if range == 1 {
+            // Only one possible answer, and no words spent discovering it.
+            return 0;
+        }
+
+        let bits: u32 = u128::BITS - (range - 1).leading_zeros();
+
+        loop {
+            let candidate: u128 = if bits <= 64 {
+                u128::from(self.next_u64()) >> (64 - bits)
+            } else {
+                let high: u128 = u128::from(self.next_u64());
+                let low: u128 = u128::from(self.next_u64());
+
+                ((high << 64) | low) >> (128 - bits)
+            };
+
+            if candidate < range {
+                return candidate;
+            }
+        }
+    }
+
+    /// A uniform index below `length`, which must not be zero.
+    ///
+    /// # Question
+    ///
+    /// "Which of these `length` positions?"
+    ///
+    /// The one place anything here turns a word into a position, so every collection
+    /// that picks or shuffles shares one unbiased bounded draw. It lives on the trait
+    /// rather than on [`Random`] so that a [`Seed`]'s cursor can do it too — which is
+    /// what lets a seeded world shuffle a deck and get the same order every time.
+    ///
+    /// # Panics
+    ///
+    /// On a zero length, which has no index to return.
+    fn index_below(&mut self, length: usize) -> usize {
+        assert!(length > 0, "cannot draw an index from an empty range");
+
+        self.bounded_u64(length as u64) as usize
+    }
+
+    /// A uniformly random [`Fixed`] in `[0, 1)`, on the `2^-FRACTION_BITS` grid.
+    ///
+    /// The same word as [`StochasticSource::unit`], keeping its top
+    /// `FRACTION_BITS` bits, so the two are one draw at two precisions rather than
+    /// two unrelated ones.
+    ///
+    /// # Why the bits are truncated rather than rounded
+    ///
+    /// `self.unit().to_fixed()` looks like the obvious implementation and is wrong:
+    /// that conversion rounds, so a draw near the top carries up to exactly one and
+    /// the range stops being half-open. Keeping the high bits cannot do that — the
+    /// result is a count below `2^FRACTION_BITS`, so it is always under one.
+    ///
+    /// Half-open matters for the same reason it does for [`Unit`]: a comparison
+    /// against a chance is only exact when one is unreachable.
+    fn fixed(&mut self) -> Fixed {
+        Fixed::fraction_from_word(self.next_u64())
+    }
+
     /// The second normal of the last pair, if the source keeps one.
     ///
     /// The polar method makes normals two at a time. A long-lived stream keeps
@@ -107,7 +212,13 @@ pub trait RandomSource {
 
 /// Randomness that something stores and advances itself, one draw at a time.
 ///
-/// [`RandomSource`] is what a sampler *borrows* to read words. This is what a
+/// Randomness something **keeps**, as against randomness an algorithm borrows.
+///
+/// # Question
+///
+/// "This thing has to roll again later, on its own. What does it store?"
+///
+/// [`StochasticSource`] is what a sampler *borrows* to read words. This is what a
 /// long-lived owner *keeps* between draws: an entry in a schedule, a component
 /// on an entity, anything that has to come back later and roll again without a
 /// generator being passed in.
@@ -123,7 +234,7 @@ pub trait RandomSource {
 /// A [`SeedCursor`] moves past every word a draw reads. A [`Random`] simply
 /// carries on where its xoshiro state left off. An immutable [`Seed`] itself
 /// deliberately does not implement this trait.
-pub trait DrawSource {
+pub trait StochasticStream {
     /// One draw, advancing this source so the next call gives a different
     /// answer.
     fn draw<D: Distribution>(&mut self, distribution: &D) -> D::Output;
@@ -136,7 +247,7 @@ pub trait DrawSource {
 }
 
 /// Carries on where the stream left off.
-impl DrawSource for Random {
+impl StochasticStream for Random {
     fn draw<D: Distribution>(&mut self, distribution: &D) -> D::Output {
         distribution.sample(self)
     }
@@ -147,7 +258,7 @@ impl DrawSource for Random {
 }
 
 /// Draws from a seed-derived cursor and carries on after every word consumed.
-impl DrawSource for SeedCursor {
+impl StochasticStream for SeedCursor {
     fn draw<D: Distribution>(&mut self, distribution: &D) -> D::Output {
         self.sample(distribution)
     }
@@ -162,7 +273,7 @@ impl DrawSource for SeedCursor {
 ///
 /// Storing this instead of a [`Seed`] or a [`Random`] costs a tag and a pointer
 /// for the streaming case, and is only worth it when the choice genuinely
-/// varies: most collections are better off generic over [`DrawSource`] and
+/// varies: most collections are better off generic over [`StochasticStream`] and
 /// homogeneous.
 #[derive(Clone, Debug)]
 pub enum EventRandom {
@@ -184,7 +295,7 @@ impl EventRandom {
 }
 
 /// Whichever kind it holds.
-impl DrawSource for EventRandom {
+impl StochasticStream for EventRandom {
     fn draw<D: Distribution>(&mut self, distribution: &D) -> D::Output {
         match self {
             Self::Seeded(seed) => seed.draw(distribution),

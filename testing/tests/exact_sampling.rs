@@ -1,7 +1,7 @@
 use voxel_world::random::{
     Bernoulli, BernoulliMask, BernoulliRatio, BinomialRatio, Categorical, DiscreteGaussian,
     DiscreteLaplace, Distribution, GeometricRatio, IntegerCategorical, Normal, PoissonRatio,
-    PortableDistribution, RANDOM_ALGORITHM_VERSION, Random, RandomSource, RandomState, Seed,
+    PortableDistribution, RANDOM_ALGORITHM_VERSION, Random, StochasticSource, RandomState, Seed,
     StochasticRound, Triangular, Uniform, UniformU64, UnitCircle, UnitDisc, UnitHypersphere,
     UnitSphere, WeightedDiscrete,
 };

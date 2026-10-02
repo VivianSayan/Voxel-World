@@ -1,6 +1,7 @@
 //! Traits for collections whose elements have a position.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
+use crate::structures::sampling;
 use crate::structures::traits::collection::{Collection, CollectionRemove};
 use std::cmp::Ordering;
 
@@ -99,9 +100,125 @@ pub trait Reorder: Collection {
 
     /// Reverses the current element order.
     fn reverse(&mut self);
+}
 
-    /// Randomly shuffles the current order using `random`.
-    fn shuffle(&mut self, random: &mut Random);
+/// A collection whose order can be randomised.
+///
+/// # Question
+///
+/// "Can this be put into a random order, and what does that mean for it?"
+///
+/// # Why this is not part of [`Reorder`]
+///
+/// It used to be, alongside `sort` and `reverse`. They are not the same capability.
+/// Sorting and reversing are deterministic rearrangements that any ordered collection
+/// can do; shuffling needs a source of randomness, and for some collections it is not
+/// a meaningful operation at all — a priority queue in a random order is no longer a
+/// priority queue.
+///
+/// Keeping it separate means implementing it is a *statement* that a random order
+/// makes sense for the type, rather than an obligation that came with being sortable.
+///
+/// # Any source
+///
+/// Generic over [`StochasticSource`], so the same collection can be shuffled by a
+/// [`Random`](crate::random::Random) stream or by a
+/// [`Seed`](crate::random::seed::Seed)'s cursor. The second is the one that makes a
+/// generated world reproducible: the same seed puts a deck in the same order every
+/// time it is built.
+///
+/// # Example
+///
+/// ```
+/// use voxel_world::random::Random;
+/// use voxel_world::random::seed::Seed;
+/// use voxel_world::structures::traits::Shuffle;
+///
+/// let mut deck: Vec<u32> = (0..52).collect();
+///
+/// // From a stream, which moves on with every draw.
+/// let mut random = Random::new(Seed::from_integer(1u64));
+/// deck.shuffle(&mut random);
+///
+/// // Or from a seed, which gives the same order for ever.
+/// let seed = Seed::from_integer(7u64).child("deck");
+/// let mut one: Vec<u32> = (0..52).collect();
+/// let mut two: Vec<u32> = (0..52).collect();
+///
+/// one.shuffle(&mut seed.cursor());
+/// two.shuffle(&mut seed.cursor());
+///
+/// assert_eq!(one, two, "one seed, one ordering");
+///
+/// // `Seed::shuffle` is the same thing said more briefly.
+/// let mut three: Vec<u32> = (0..52).collect();
+/// seed.shuffle(&mut three);
+///
+/// assert_eq!(one, three);
+/// ```
+pub trait Shuffle {
+    /// Puts the elements into a uniformly random order.
+    ///
+    /// Every ordering is equally likely, in place, one draw per element.
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S);
+
+    /// Fills just the first `count` places with a random selection, and reports how
+    /// many that was.
+    ///
+    /// # Why this exists next to [`Shuffle::shuffle`]
+    ///
+    /// A full shuffle costs one draw per element. This costs one per *chosen*
+    /// element, so taking three spawn points out of a million candidates is three
+    /// draws rather than a million.
+    ///
+    /// What follows the first `count` places is left in whatever order the partial
+    /// swaps happened to leave it. That is **not** a valid shuffle of the remainder
+    /// and must not be treated as one.
+    ///
+    /// Returns `count`, or the length if that is smaller.
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize;
+}
+
+/// Shuffled in place, which is what every slice-backed collection here comes down to.
+impl<T> Shuffle for [T] {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        sampling::shuffle(self, source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        sampling::partial_shuffle(self, count, source)
+    }
+}
+
+/// Forwards to the slice implementation.
+///
+/// # Why this is not redundant with `[T]`
+///
+/// A `Vec` reaches the slice implementation by deref coercion when the receiver is
+/// known to be a slice, which covers `vec.shuffle(&mut source)`. It does **not** cover
+/// being passed to a generic parameter: [`Seed::shuffle`](crate::random::seed::Seed::shuffle)
+/// takes `&mut T where T: Shuffle`, and Rust infers `T = Vec<_>` there rather than
+/// coercing, so without this impl `seed.shuffle(&mut vec)` would not compile.
+impl<T> Shuffle for Vec<T> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.as_mut_slice().shuffle(source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        self.as_mut_slice().partial_shuffle(count, source)
+    }
+}
+
+/// Forwards to the slice implementation, for the same reason [`Vec`] does: an array
+/// passed to a generic parameter is inferred as `[T; N]` rather than unsized to `[T]`.
+impl<T, const N: usize> Shuffle for [T; N] {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.as_mut_slice().shuffle(source);
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        self.as_mut_slice().partial_shuffle(count, source)
+    }
 }
 
 /// A collection that holds at most a fixed number of elements.

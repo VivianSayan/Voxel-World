@@ -23,7 +23,7 @@ pub use tick_scheduler::TickScheduler;
 pub mod standard;
 
 pub use measured::{FuzzySet, MEMBERSHIP_TOLERANCE, MultiSet, WeightedSet};
-pub use rota::{MultiRota, OrderedMultiRota, OrderedRota, Rota};
+pub use rota::{MultiRota, OrderedMultiRota, OrderedRota, Rota, TickRota, TickRotaUpdate};
 pub use sequences::{
     BoundedOrderedSet, BucketQueue, Cadence, CadenceId, Firing, KeyedOrderedSet, LabeledOrderedSet,
     OnBacklog, OrderedSet, PriorityQueue, RingBuffer, RunLengthSequence, Scheduler,

@@ -48,7 +48,7 @@
 //! ```
 
 use super::Palette;
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::RunLengthSequence;
 use crate::structures::traits::{
     CanonicalOrder, Choose, Collection, ContentHashable, DeterministicOrder, Sequence, StableHash,
@@ -134,9 +134,9 @@ impl<T: Clone + PartialEq> Sequence for CompactSequence<T> {
 }
 
 impl<T: Clone + PartialEq> Choose for CompactSequence<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         (!self.is_empty())
-            .then(|| self.get(random.uniform_index(self.len())))
+            .then(|| self.get(source.index_below(self.len())))
             .flatten()
     }
 }

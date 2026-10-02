@@ -6,7 +6,8 @@
 //! the product `ab`, difference (`-`) is `min(a, 1 - b)` and complement
 //! (`!`) is `1 - a`, so memberships behave like independent probabilities.
 
-use crate::random::Random;
+use crate::random::distributions::{Bernoulli, Distribution};
+use crate::random::source::StochasticSource;
 use crate::structures::collections::measured::tally::Tally;
 use crate::structures::traits::{
     Choose, ChooseByMeasure, Collection, CollectionInsert, CollectionRemove, Element, Measured,
@@ -89,10 +90,11 @@ impl<T> FuzzySet<T> {
 
     /// Resolves the fuzziness: each element is kept with probability equal
     /// to its membership. Collect into whichever collection is needed.
-    pub fn realize<'a>(&'a self, random: &mut Random) -> impl Iterator<Item = &'a T> {
+    pub fn realize<'a, S: StochasticSource + ?Sized>(&'a self, source: &mut S) -> impl Iterator<Item = &'a T> {
         self.iter()
             .filter(move |(_, membership)| {
-                *membership == Probability::ALWAYS || random.bernoulli(*membership)
+                *membership == Probability::ALWAYS
+                    || Bernoulli::new(*membership).sample(source)
             })
             .map(|(item, _)| item)
     }
@@ -298,26 +300,26 @@ impl<T: Element> MeasuredMut for FuzzySet<T> {
 
 /// Picks elements in proportion to their membership.
 impl<T: Element> Choose for FuzzySet<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         self.tally
-            .choose_one_weighted(random, |membership| membership)
+            .choose_one_weighted(source, |membership| membership)
     }
 
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
         self.tally
-            .choose_weighted(random, amount, |membership| membership, |_| {})
+            .choose_weighted(source, amount, |membership| membership, |_| {})
     }
 }
 
 /// Weighted by membership: an element that half belongs is half as likely as
 /// one that fully does.
 impl<T: Element> WeightedChoose for FuzzySet<T> {
-    fn choose_weighted(&self, random: &mut Random) -> Option<&T> {
-        self.choose(random)
+    fn choose_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.choose(source)
     }
 
-    fn choose_multiple_weighted(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        self.choose_multiple(random, amount)
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        self.choose_multiple(source, amount)
     }
 
     fn weighted_chance_of(&self, item: &T) -> Probability {

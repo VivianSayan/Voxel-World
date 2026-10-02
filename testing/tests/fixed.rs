@@ -508,13 +508,26 @@ fn text_round_trips_exactly() {
 
 #[test]
 fn parsing_rejects_what_is_not_a_number() {
-    for bad in ["", "abc", "1.2.3", "--1", "1e5", " 1", "1 "] {
+    for bad in ["", "abc", "1.2.3", "--1", " 1", "1 ", "1e", "e10", "1..2", "1f32"] {
         assert!(Fixed::from_str(bad).is_err(), "{bad:?} should be refused");
     }
 
     assert_eq!(Fixed::from_str("0.5").unwrap(), Fixed::HALF);
     assert_eq!(Fixed::from_str("-0.5").unwrap(), -Fixed::HALF);
     assert_eq!(Fixed::from_str("+2").unwrap(), Fixed::from_integer(2));
+
+    // Scientific notation is accepted now; it was refused while this type had its own
+    // hand-rolled parser, and gaining it was the point of moving to the shared one.
+    assert_eq!(Fixed::from_str("1e5").unwrap(), Fixed::from_integer(100_000));
+    assert_eq!(Fixed::from_str("1.25e-4").unwrap(), Fixed::from_str("0.000125").unwrap());
+
+    // And the rounding is nearest rather than the truncation it used to be: a tenth
+    // sits just above a grid point, so nearest rounds up where truncation went down.
+    assert_eq!(
+        Fixed::from_str("0.1").unwrap().to_bits(),
+        429_496_730,
+        "1/10 at 32 fractional bits, rounded to nearest"
+    );
 }
 
 #[test]

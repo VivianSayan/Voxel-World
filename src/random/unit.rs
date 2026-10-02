@@ -7,7 +7,7 @@
 use crate::math::unit_interval::Unit;
 use crate::random::distributions::{Distribution, PortableDistribution};
 use crate::random::seed::Seed;
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 
 impl Unit {
     /// The fraction a seed stands for, in `[0, 1)`.
@@ -29,7 +29,7 @@ impl Unit {
     }
 
     /// Whether an event at this chance happens, drawing from a source.
-    pub fn decide_from<S: RandomSource + ?Sized>(self, source: &mut S) -> bool {
+    pub fn decide_from<S: StochasticSource + ?Sized>(self, source: &mut S) -> bool {
         Self::from_word(source.next_u64()) < self
     }
 }
@@ -45,7 +45,7 @@ pub struct UniformUnit;
 impl Distribution for UniformUnit {
     type Output = Unit;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Unit {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Unit {
         Unit::from_word(source.next_u64())
     }
 }

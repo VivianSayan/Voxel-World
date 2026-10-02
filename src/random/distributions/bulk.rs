@@ -21,9 +21,12 @@
 //! | How many failures before the R-th success? | [`NegativeBinomial`] |
 //! | How many succeed when each has its own chance? | [`PoissonBinomial`] |
 
-use super::{Binomial, Distribution, Gamma, GeometricRatio, Poisson, PortableDistribution};
+use super::{
+    Binomial, BinomialRatio, Distribution, Gamma, GeometricRatio, Poisson, PortableDistribution,
+};
+use crate::math::Ratio;
 use crate::units::Rate;
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::units::Unit;
 
 // ---------------------------------------------------------------------------
@@ -101,7 +104,7 @@ impl Distribution for SparseSuccesses {
     /// [`Binomial`] for the count or test positions directly.
     type Output = std::vec::IntoIter<u64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Self::Output {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Self::Output {
         let mut found: Vec<u64> = Vec::new();
 
         if self.chance.is_zero() || self.count == 0 {
@@ -203,7 +206,14 @@ impl Distribution for SparseSuccesses {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Multinomial {
     count: u64,
-    shares: Vec<Unit>,
+    /// The weights, as plain integers.
+    ///
+    /// This has always been the algorithm's real currency: a [`Unit`] share was only
+    /// ever read as `share.to_bits()` and normalised against the others, so nothing is
+    /// lost by holding the integers themselves — and [`Multinomial::portable_weights`]
+    /// can then take a caller's exact weights without rounding them onto any grid.
+    weights: Vec<u128>,
+    exact_conditional: bool,
 }
 
 impl Multinomial {
@@ -216,62 +226,165 @@ impl Multinomial {
         // Summed in the integer representation, so the check needs no float and
         // cannot overflow: each share is at most `2^63` and there are at most
         // `usize::MAX` of them, held in a `u128`.
-        let total: u128 = shares.iter().map(|share| u128::from(share.to_bits())).sum();
+        let weights: Vec<u128> = shares
+            .iter()
+            .map(|share| u128::from(share.to_bits()))
+            .collect();
 
-        if total == 0 {
+        if weights.iter().sum::<u128>() == 0 {
             return None;
         }
 
         Some(Self {
             count,
-            shares: shares.to_vec(),
+            weights,
+            exact_conditional: false,
         })
+    }
+
+    /// The same split, drawn so the result is identical on every target.
+    ///
+    /// # Question
+    ///
+    /// "I need this split to come out the same for every player. How?"
+    ///
+    /// # What changes
+    ///
+    /// The conditional binomial at each step is drawn with
+    /// [`BinomialRatio`](super::BinomialRatio) — integer-only, bit-for-bit portable —
+    /// instead of [`Binomial`], whose chance is an `f64` and whose rejection sampler
+    /// therefore depends on the platform's floating point. Everything else is the
+    /// same decomposition.
+    ///
+    /// # What it costs
+    ///
+    /// `BinomialRatio` counts set bits in drawn words, so it spends roughly one word
+    /// per 64 trials where `Binomial` uses a constant handful. That is cheap for the
+    /// counts a loot table or spawn group produces and expensive for a count in the
+    /// millions, which is why it is a choice rather than the default.
+    ///
+    /// # Accuracy
+    ///
+    /// The conditional chance is `weight / unclaimed`, which can need more than 64
+    /// bits in each half. Where it does, both halves are shifted down together until
+    /// they fit a [`Ratio`](crate::math::Ratio) — the same value to within the last
+    /// bit, and shifted deterministically, so portability is not traded for it.
+    pub fn portable(count: u64, shares: &[Unit]) -> Option<Self> {
+        let mut split = Self::new(count, shares)?;
+        split.exact_conditional = true;
+
+        Some(split)
+    }
+
+    /// A portable split over **exact integer weights**, with no grid in between.
+    ///
+    /// # Question
+    ///
+    /// "My table has weights `40, 25, 30, 5`. Can the split use those numbers
+    /// themselves?"
+    ///
+    /// # Why this exists beside the [`Unit`] constructors
+    ///
+    /// A weight is a whole number and the ratios between whole numbers are exact.
+    /// Passing them as [`Unit`] shares means first dividing by the total and rounding
+    /// the quotient onto the `2^-63` grid — so `1, 2` arrives as a pair of values whose
+    /// ratio is *within one part in `2^63`* of a half, rather than a half.
+    ///
+    /// Nothing in a game would ever see that. It is still a rounding that need not
+    /// happen, and removing it makes the probabilities exact by construction instead of
+    /// exact to a bound. A positive weight stays strictly positive here because its
+    /// conditional chance is the fraction `weight / unclaimed`, which has a positive
+    /// numerator by definition.
+    ///
+    /// # Range
+    ///
+    /// `None` when there are no weights or all of them are zero. The weights are
+    /// summed in a `u128`, so any `u64` table sums without overflowing; where the
+    /// running total does exceed a `u64`, the conditional fraction is reduced by a
+    /// shared shift before becoming a [`Ratio`], which keeps it deterministic. A table
+    /// whose weights fit a `u64` — which [`BulkPickTable`](crate::random::BulkPickTable)
+    /// enforces — never reaches that path and is exact throughout.
+    pub fn portable_weights(count: u64, weights: &[u64]) -> Option<Self> {
+        if weights.is_empty() {
+            return None;
+        }
+
+        let weights: Vec<u128> = weights.iter().copied().map(u128::from).collect();
+
+        if weights.iter().sum::<u128>() == 0 {
+            return None;
+        }
+
+        Some(Self {
+            count,
+            weights,
+            exact_conditional: true,
+        })
+    }
+
+    /// Whether this split draws identically on every target.
+    pub const fn is_portable(&self) -> bool {
+        self.exact_conditional
     }
 
     /// How many categories the split has.
     pub fn categories(&self) -> usize {
-        self.shares.len()
+        self.weights.len()
     }
 }
 
 impl Distribution for Multinomial {
     type Output = Vec<u64>;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Vec<u64> {
-        let mut counts: Vec<u64> = vec![0; self.shares.len()];
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Vec<u64> {
+        let mut counts: Vec<u64> = vec![0; self.weights.len()];
         let mut remaining: u64 = self.count;
         // Tracked as integers so the conditional chance below is exact.
         let mut unclaimed: u128 = self
-            .shares
+            .weights
             .iter()
-            .map(|share| u128::from(share.to_bits()))
+            .copied()
             .sum();
 
         // Conditional binomials: each category takes its share of what is left, at
         // its share of the weight that is left. The last one is not drawn at all —
         // it gets the remainder, which is what makes the total exact.
-        for (index, share) in self.shares.iter().enumerate() {
+        for (index, weight) in self.weights.iter().copied().enumerate() {
             if remaining == 0 {
                 break;
             }
 
-            if index + 1 == self.shares.len() {
+            if index + 1 == self.weights.len() {
                 counts[index] = remaining;
                 break;
             }
-
-            let weight: u128 = u128::from(share.to_bits());
 
             if weight == 0 || unclaimed == 0 {
                 continue;
             }
 
-            // This category's chance *among what is still unclaimed*.
-            let conditional: Unit = Unit::from_bits_clamped(
-                ((weight << 63) / unclaimed).min(u128::from(Unit::STEPS)) as u64,
-            );
+            let taken: u64 = if self.exact_conditional {
+                // `weight / unclaimed` as a Ratio, which needs both halves in a u64.
+                // Shifting them down together keeps the value to within its last bit
+                // and is itself deterministic.
+                let shift: u32 = unclaimed
+                    .checked_ilog2()
+                    .map_or(0, |highest| highest.saturating_sub(63));
 
-            let taken: u64 = Binomial::new(remaining, conditional.to_probability()).sample(source);
+                let chance: Ratio = Ratio::new((weight >> shift) as u64, (unclaimed >> shift) as u64)
+                    .unwrap_or(Ratio::ONE);
+
+                BinomialRatio::new(remaining, chance)
+                    .expect("a conditional share cannot exceed one")
+                    .sample(source)
+            } else {
+                // This category's chance *among what is still unclaimed*.
+                let conditional: Unit = Unit::from_bits_clamped(
+                    ((weight << 63) / unclaimed).min(u128::from(Unit::STEPS)) as u64,
+                );
+
+                Binomial::new(remaining, conditional.to_probability()).sample(source)
+            };
 
             counts[index] = taken;
             remaining -= taken;
@@ -464,7 +577,7 @@ impl Distribution for Hypergeometric {
     /// population drawn, half of it successes — is expensive, and that is the case
     /// [`Random::hypergeometric_with`](crate::random::Random::hypergeometric_with)
     /// exists for.
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let (successes, effective_successes, effective_draws, mirror_successes, mirror_draws) =
             self.reduced();
 
@@ -590,7 +703,7 @@ impl NegativeBinomial {
 impl Distribution for NegativeBinomial {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         if self.successes == 0 {
             return 0;
         }
@@ -712,7 +825,7 @@ impl PoissonBinomial {
 impl Distribution for PoissonBinomial {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         self.chances
             .iter()
             .filter(|chance| chance.decide_from(source))
@@ -737,7 +850,7 @@ const GAP_SUM_LIMIT: u64 = 20;
 const WALK_LIMIT: u64 = 32;
 
 /// The definition, one item at a time: exact, and obvious.
-fn walk_without_replacement<S: RandomSource + ?Sized>(
+fn walk_without_replacement<S: StochasticSource + ?Sized>(
     source: &mut S,
     population: u64,
     successes: u64,
@@ -783,7 +896,7 @@ fn walk_without_replacement<S: RandomSource + ?Sized>(
 /// Caller must have reduced the parameters already — this expects `draws` and
 /// `successes` each to be no more than half the population, which the symmetry
 /// reduction in [`Hypergeometric`] guarantees.
-fn hypergeometric_hrua<S: RandomSource + ?Sized>(
+fn hypergeometric_hrua<S: StochasticSource + ?Sized>(
     source: &mut S,
     population: u64,
     successes: u64,

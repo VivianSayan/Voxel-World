@@ -17,7 +17,7 @@
 //! rejection step of its own.
 
 use super::{Distribution, PortableDistribution};
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::units::Ratio;
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ impl Digits {
 ///
 /// Reads one word, and another only in the `2^-64` case that all its bits
 /// matched the expansion.
-pub(super) fn chance_fraction<S: RandomSource + ?Sized>(
+pub(super) fn chance_fraction<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -113,7 +113,7 @@ pub(super) fn chance_fraction<S: RandomSource + ?Sized>(
 /// True with probability exactly `numerator / (denominator * divisor)`, without
 /// the product overflowing: when it would, the chance is split into two
 /// independent coins.
-fn chance_fraction_divided<S: RandomSource + ?Sized>(
+fn chance_fraction_divided<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -141,7 +141,7 @@ fn chance_fraction_divided<S: RandomSource + ?Sized>(
 /// rest stay open; where it is a zero, the lanes that drew a one are settled as
 /// failures. Any lane still level with the fraction when its digits run out is
 /// at or above it, and so a failure.
-fn chance_mask<S: RandomSource + ?Sized>(
+fn chance_mask<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -182,7 +182,7 @@ fn chance_mask<S: RandomSource + ?Sized>(
 /// answer is whether the count of tosses was odd: the chance of that is the
 /// alternating series for `exp(-x)`. A larger exponent is split into its whole
 /// part, one `exp(-1)` coin per unit, and the rest.
-fn chance_exp_minus<S: RandomSource + ?Sized>(
+fn chance_exp_minus<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -199,7 +199,7 @@ fn chance_exp_minus<S: RandomSource + ?Sized>(
 }
 
 /// [`chance_exp_minus`] for an exponent of at most one.
-fn chance_exp_minus_below_one<S: RandomSource + ?Sized>(
+fn chance_exp_minus_below_one<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -251,7 +251,7 @@ impl BernoulliRatio {
 impl Distribution for BernoulliRatio {
     type Output = bool;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> bool {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> bool {
         if self.numerator == 0 {
             return false;
         }
@@ -297,7 +297,7 @@ impl BernoulliMask {
 impl Distribution for BernoulliMask {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         chance_mask(source, self.numerator as u128, self.denominator as u128)
     }
 }
@@ -339,7 +339,7 @@ impl BinomialRatio {
 impl Distribution for BinomialRatio {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         let whole_words: u64 = self.trials / u64::BITS as u64;
         let leftover: u32 = (self.trials % u64::BITS as u64) as u32;
 
@@ -395,7 +395,7 @@ impl PoissonRatio {
 impl Distribution for PoissonRatio {
     type Output = u64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> u64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> u64 {
         if self.numerator == 0 {
             return 0;
         }
@@ -424,7 +424,7 @@ impl Distribution for PoissonRatio {
 /// denominator, leaves exactly the Poisson probabilities. Both sides of that
 /// fraction stay far inside 128 bits for any count the coins can realistically
 /// reach, as does the piece denominator, which stays below `2^67`.
-fn poisson_piece<S: RandomSource + ?Sized>(
+fn poisson_piece<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u128,
     denominator: u128,
@@ -478,7 +478,7 @@ impl DiscreteLaplace {
 impl Distribution for DiscreteLaplace {
     type Output = i64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> i64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> i64 {
         discrete_laplace(source, self.numerator, self.denominator)
     }
 }
@@ -491,7 +491,7 @@ impl Distribution for DiscreteLaplace {
 /// which is geometric at `exp(-1)`. Their combination has exactly the Laplace
 /// weights. A sign is drawn last, and a negative zero is rejected so that zero
 /// is not counted from both sides.
-fn discrete_laplace<S: RandomSource + ?Sized>(
+fn discrete_laplace<S: StochasticSource + ?Sized>(
     source: &mut S,
     numerator: u64,
     denominator: u64,
@@ -589,7 +589,7 @@ impl DiscreteGaussian {
 impl Distribution for DiscreteGaussian {
     type Output = i64;
 
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> i64 {
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> i64 {
         if self.numerator == 0 {
             return self.mean;
         }

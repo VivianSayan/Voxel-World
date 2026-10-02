@@ -60,7 +60,7 @@ pub mod prelude {
         ChooseByMeasure, ChooseMut, Collection, CollectionInsert, CollectionMut, CollectionRemove,
         ContentHashable, DeterministicMapOrder, DeterministicOrder, Element, EvictingInsert,
         FixedCapacity, GroupSizes, Grouping, HandleStore, InsertAt, Key, Map, MapMut, Measured,
-        MeasuredMut, Partitioned, PriorityQueueLike, RangeQuery, Reorder, Sequence, SequenceMut,
+        MeasuredMut, Partitioned, PriorityQueueLike, RangeQuery, Reorder, Sequence, SequenceMut, Shuffle,
         SetAlgebra, SharedValueMap, SparseIndexed, StableHash, UniqueCollection, UniqueValueMap,
         ValueCollection, ValueIndexed, ValueIndexedMut, ValueSetAlgebra, WeightedChoose,
     };

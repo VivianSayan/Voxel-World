@@ -50,6 +50,8 @@ use std::time::{Duration, Instant};
 use voxel_world::math::Vector3;
 use voxel_world::random::seed::Seed;
 use voxel_world::spatial::VoxelPosition3;
+use voxel_world::time::{Seconds, Tick, TickDuration, TickRate};
+use voxel_world::units::frame::{Frame, FrameClock, FrameDelta};
 use voxel_world::world::{ChunkGenerator, VoxelType, VoxelTypeIndex};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -65,7 +67,10 @@ const TICKS_PER_SECOND: u32 = 60;
 ///
 /// Without a cap, a long stall leaves so many ticks owed that running them
 /// takes longer than the stall did, which owes more still.
-const MAX_CATCH_UP_TICKS: usize = 5;
+///
+/// A [`TickDuration`] rather than a count, so it can be compared against the
+/// ticks actually caught up without either side being a bare number.
+const MAX_CATCH_UP_TICKS: TickDuration = TickDuration::new(5);
 
 fn main() {
     describe_world();
@@ -116,26 +121,30 @@ struct Playground {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
 
-    /// How long one tick lasts.
-    tick_interval: Duration,
-    /// When the next tick is due. Advanced by exactly one interval per tick,
-    /// never reset to the clock, so the timeline does not drift.
-    next_tick: Instant,
+    /// Turns measured frame time into whole simulation ticks.
+    ///
+    /// Holds the rate, the accumulator, the current [`Tick`] and the frame
+    /// index, so none of that is tracked by hand here. It deliberately holds no
+    /// policy: the catch-up cap below is this loop's decision, not the clock's.
+    clock: FrameClock,
+    /// When the last frame was measured — the only place the real clock is read.
+    last_frame: Instant,
 
-    /// How many ticks have run, and how many were dropped to catch up.
-    ticks: u64,
-    dropped: u64,
+    /// How many ticks were dropped to catch up. A duration, since it is an
+    /// amount of time and not a moment in it.
+    dropped: TickDuration,
 }
 
 impl Playground {
     fn new() -> Self {
+        let rate: TickRate = TickRate::new(TICKS_PER_SECOND).expect("a positive tick rate");
+
         Self {
             window: None,
             renderer: None,
-            tick_interval: Duration::from_secs_f64(1.0 / f64::from(TICKS_PER_SECOND)),
-            next_tick: Instant::now(),
-            ticks: 0,
-            dropped: 0,
+            clock: FrameClock::new(rate),
+            last_frame: Instant::now(),
+            dropped: TickDuration::ZERO,
         }
     }
 
@@ -144,40 +153,65 @@ impl Playground {
     /// It runs at a fixed rate, so anything here can assume exactly one
     /// interval has passed since the last call, whatever the frame rate is
     /// doing.
-    fn simulation_tick(&mut self) {
-        self.ticks += 1;
-
+    fn simulation_tick(&mut self, now: Tick) {
         // A sign of life once a second, which is also a reminder that the rate
         // is fixed: this stays at one line a second whatever the window does.
-        if self.ticks.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
-            let seconds: u64 = self.ticks / u64::from(TICKS_PER_SECOND);
-            println!("tick {} ({seconds}s, {} dropped)", self.ticks, self.dropped);
+        //
+        // `is_every` and `seconds_at` are what the tick types are for — the
+        // schedule and the clock conversion are asked for by name rather than
+        // rebuilt out of a modulo and a division that could each be wrong.
+        if now.is_every(TickDuration::new(u64::from(TICKS_PER_SECOND))) {
+            let elapsed: Seconds = self.clock.rate().seconds_at(now);
+
+            println!(
+                "{now} ({:.0}s, {} dropped)",
+                elapsed.to_f64(),
+                self.dropped,
+            );
         }
     }
 
-    /// Runs whatever ticks are due, and says when the next one is.
+    /// Measures the frame, runs the ticks it paid for, and says when to wake.
     fn run_due_ticks(&mut self) -> Instant {
-        let mut caught_up: usize = 0;
+        // The one place the real clock is read. A `Duration` holds integer
+        // seconds and nanoseconds, and `FrameDelta::from_duration` scales those
+        // into `Fixed` directly — no `as_secs_f64`, so nothing is rounded twice.
+        let measured: Instant = Instant::now();
+        let delta: FrameDelta = FrameDelta::from_duration(measured.duration_since(self.last_frame))
+            .unwrap_or(FrameDelta::ZERO);
 
-        while Instant::now() >= self.next_tick && caught_up < MAX_CATCH_UP_TICKS {
-            self.simulation_tick();
+        self.last_frame = measured;
 
-            // The intended timeline, not the clock: a tick that ran late does
-            // not push the ones after it late as well.
-            self.next_tick += self.tick_interval;
-            caught_up += 1;
+        let frame: Frame = self.clock.begin_frame(delta);
+
+        // The clock says how many ticks the elapsed time paid for; the cap is
+        // this loop's policy, which is why the clock knows nothing about it.
+        let mut caught_up: TickDuration = TickDuration::ZERO;
+
+        while caught_up < MAX_CATCH_UP_TICKS {
+            let Some(now) = self.clock.take_tick() else {
+                break;
+            };
+
+            self.simulation_tick(now);
+            caught_up += TickDuration::ONE;
         }
 
-        // Still behind after a full pass, so the backlog is dropped rather than
-        // chased. Counted, because silently losing time is the sort of thing
-        // that should show up in a log rather than as a mystery.
-        if caught_up == MAX_CATCH_UP_TICKS && Instant::now() >= self.next_tick {
-            let behind: Duration = Instant::now().duration_since(self.next_tick);
-            self.dropped += (behind.as_secs_f64() / self.tick_interval.as_secs_f64()) as u64;
-            self.next_tick = Instant::now() + self.tick_interval;
-        }
+        // Still behind after a full pass, so the backlog is abandoned rather
+        // than chased. Counted, because silently losing time should show up in a
+        // log rather than as a mystery.
+        self.dropped += self.clock.discard_backlog();
 
-        self.next_tick
+        // Whatever is left in the accumulator is how far into the next tick the
+        // clock already is, so the next one falls due the rest of a tick away.
+        // `frame.tick_alpha()` is that same leftover as a fraction, which is what
+        // a renderer interpolates the world's last two states by.
+        let remaining: Seconds = self.clock.tick_length() - self.clock.accumulated();
+        let _ = frame.tick_alpha();
+
+        // An `f64` here is correct: this is the boundary out to the operating
+        // system, and a `Duration` is what it asked for.
+        measured + Duration::from_secs_f64(remaining.to_f64())
     }
 }
 
@@ -200,7 +234,7 @@ impl ApplicationHandler for Playground {
 
         // Start the timeline now rather than whenever the struct was made, so
         // start-up does not count as a stall to be caught up.
-        self.next_tick = Instant::now();
+        self.last_frame = Instant::now();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -255,6 +289,11 @@ impl ApplicationHandler for Playground {
             renderer.destroy();
         }
 
-        println!("ran {} ticks, dropped {}", self.ticks, self.dropped);
+        println!(
+            "ran {} ticks over {} frames, dropped {}",
+            self.clock.now().ticks_since(Tick::ORIGIN),
+            self.clock.frames_presented(),
+            self.dropped,
+        );
     }
 }

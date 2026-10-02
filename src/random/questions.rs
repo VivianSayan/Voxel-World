@@ -10,17 +10,61 @@
 //! generator is a fixed algorithm that should almost never move, while this grows
 //! every time there is a new question worth asking.
 
+use crate::math::Fixed;
+use crate::random::bulk_pick::{
+    BulkError, BulkPickResult, BulkPickTable, CountDistribution, QuantityDistribution, bulk_pick,
+};
+use crate::structures::traits::Shuffle;
+use crate::random::fixed_point::UniformFixedRange;
 use crate::math::linear::{Vector2, Vector3, Vector4};
 use crate::random::approximation::{
     Approximation, BinomialAlgorithm, HypergeometricAlgorithm, PoissonAlgorithm,
     PoissonBinomialAlgorithm,
 };
 use crate::random::distributions::*;
-use crate::random::source::RandomSource;
+use crate::random::source::StochasticSource;
 use crate::random::{Random, approximation, distributions};
 use crate::units::{Probability, Rate, Ratio, Unit, Weights};
 
 impl Random {
+    /// A uniformly random [`Fixed`] in `[low, high)`.
+    ///
+    /// # Question
+    ///
+    /// "What is a random value between these two bounds, deterministically?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use voxel_world::math::Fixed;
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// # let mut random = Random::new(Seed::from_integer(1u64));
+    /// let height = random.fixed_range(Fixed::from_integer(60), Fixed::from_integer(80));
+    ///
+    /// assert!(height >= Fixed::from_integer(60) && height < Fixed::from_integer(80));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the range is empty or inverted, as the other shorthands here do for
+    /// parameters their distribution would refuse. Use
+    /// [`UniformFixedRange::new`](crate::random::UniformFixedRange::new) where the
+    /// bounds come from somewhere that might produce an empty one.
+    ///
+    /// # Why not `low + self.fixed() * (high - low)`
+    ///
+    /// Because that is not uniform. Scaling a `[0, 1)` draw maps several fractions
+    /// onto the same step and misses others, so some values become likelier than their
+    /// neighbours. This draws over the steps between the bounds instead, so every
+    /// representable value in the range is equally likely.
+    pub fn fixed_range(&mut self, low: Fixed, high: Fixed) -> Fixed {
+        let range = UniformFixedRange::new(low, high)
+            .expect("a fixed-point range must hold at least one value");
+
+        self.sample(&range)
+    }
+
     /// One draw from any distribution.
     ///
     /// # Question
@@ -382,6 +426,61 @@ impl Random {
     /// let picked = loot[random.uniform_index(loot.len())];
     /// # let _ = picked;
     /// ```
+    /// One element of a slice, or [`None`] when it is empty.
+    ///
+    /// # Question
+    ///
+    /// "Which one of these?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// # let mut random = Random::new(Seed::from_integer(1u64));
+    /// let loot = ["sword", "shield", "potion"];
+    ///
+    /// assert!(loot.contains(random.pick(&loot).unwrap()));
+    /// assert_eq!(random.pick::<u8>(&[]), None);
+    /// ```
+    ///
+    /// The counterpart of [`Seed::pick`](crate::random::seed::Seed::pick), which
+    /// answers the same question for a fixed seed. Prefer this to indexing with
+    /// [`Random::uniform_index`], which panics on an empty slice where this reports it.
+    pub fn pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T> {
+        (!items.is_empty()).then(|| &items[self.index_below(items.len())])
+    }
+
+    /// One element of a slice, mutably, or [`None`] when it is empty.
+    ///
+    /// # Question
+    ///
+    /// "Which one of these should I change?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// # let mut random = Random::new(Seed::from_integer(2u64));
+    /// let mut health = [10u32; 4];
+    ///
+    /// if let Some(one) = random.pick_mut(&mut health) {
+    ///     *one -= 1;
+    /// }
+    ///
+    /// assert_eq!(health.iter().sum::<u32>(), 39);
+    /// ```
+    pub fn pick_mut<'a, T>(&mut self, items: &'a mut [T]) -> Option<&'a mut T> {
+        if items.is_empty() {
+            return None;
+        }
+
+        let index: usize = self.index_below(items.len());
+
+        Some(&mut items[index])
+    }
+
     pub fn uniform_index(&mut self, length: usize) -> usize {
         assert!(length > 0, "cannot sample an empty index range");
         self.bounded_u64(length as u64) as usize
@@ -1171,8 +1270,79 @@ impl Random {
     /// ```
     ///
     /// Every ordering equally likely, in place, one draw per item.
-    pub fn shuffle<T>(&mut self, items: &mut [T]) {
-        crate::structures::sampling::shuffle(items, self);
+    ///
+    /// # Anything that can be shuffled
+    ///
+    /// The argument is any [`Shuffle`](crate::structures::traits::Shuffle), not only a
+    /// slice, so a collection that keeps an index or splits its storage reorders itself
+    /// correctly without this method knowing how:
+    ///
+    /// ```
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// # use voxel_world::structures::collections::sequences::ring_buffer::RingBuffer;
+    /// # let mut random = Random::new(Seed::from_integer(3u64));
+    /// let mut recent: RingBuffer<u32> = RingBuffer::new(8);
+    /// for value in 0..8 {
+    ///     recent.push_back(value);
+    /// }
+    ///
+    /// random.shuffle(&mut recent);
+    ///
+    /// assert_eq!(recent.len(), 8);
+    /// ```
+    ///
+    /// The counterpart is [`Seed::shuffle`](crate::random::seed::Seed::shuffle), which
+    /// gives one fixed ordering instead of a new one each call. This advances the
+    /// stream; that one takes a temporary cursor from a seed.
+    /// Everything one weighted table produces, this time.
+    ///
+    /// # Question
+    ///
+    /// "What is in this chest, on this occasion?"
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use voxel_world::random::Random;
+    /// # use voxel_world::random::seed::Seed;
+    /// use voxel_world::random::bulk_pick::{BulkPickEntry, BulkPickTable, Count, Quantity};
+    ///
+    /// # let mut random = Random::new(Seed::from_integer(1u64));
+    /// let spawns = BulkPickTable {
+    ///     count: Count::Uniform { low: 0, high: 4 },
+    ///     entries: vec![
+    ///         BulkPickEntry::new("wolf", 70, Quantity::Fixed(1)),
+    ///         BulkPickEntry::new("bear", 30, Quantity::Fixed(1)),
+    ///     ],
+    /// };
+    ///
+    /// let group = random.bulk_pick(&spawns).expect("a valid table");
+    ///
+    /// // Nought to four animals, and possibly none at all.
+    /// assert!(group.iter().map(|one| one.selections).sum::<u64>() <= 4);
+    /// ```
+    ///
+    /// Advances the stream, so consecutive calls generally differ. For the same answer
+    /// every time — a chest that holds what it held before — use
+    /// [`Seed::bulk_pick`](crate::random::seed::Seed::bulk_pick).
+    ///
+    /// The three stages and what each costs are documented on
+    /// [`bulk_pick`](crate::random::bulk_pick::bulk_pick), which this calls.
+    pub fn bulk_pick<T, C, Q>(
+        &mut self,
+        table: &BulkPickTable<T, C, Q>,
+    ) -> Result<Vec<BulkPickResult<T>>, BulkError>
+    where
+        T: Clone,
+        C: CountDistribution,
+        Q: QuantityDistribution,
+    {
+        bulk_pick(table, self)
+    }
+
+    pub fn shuffle<T: Shuffle + ?Sized>(&mut self, items: &mut T) {
+        items.shuffle(self);
     }
 
     /// Fills just the first `count` places with a random selection.
@@ -1197,8 +1367,8 @@ impl Random {
     ///
     /// One draw per *chosen* item rather than per item. Only the first `count` places
     /// are a valid random selection; the rest are left disturbed, not shuffled.
-    pub fn partial_shuffle<T>(&mut self, items: &mut [T], count: usize) -> usize {
-        crate::structures::sampling::partial_shuffle(items, count, self)
+    pub fn partial_shuffle<T: Shuffle + ?Sized>(&mut self, items: &mut T, count: usize) -> usize {
+        items.partial_shuffle(count, self)
     }
 }
 

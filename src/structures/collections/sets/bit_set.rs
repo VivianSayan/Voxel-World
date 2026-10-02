@@ -12,7 +12,7 @@
 //! back 64 independent decisions as a `u64`, and [`BitSet::from_word`] and
 //! [`BitSet::insert_word`] take them without unpacking.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::traits::{
     CanonicalOrder, ContentHashable, DeterministicOrder, ValueCollection, ValueSetAlgebra,
 };
@@ -380,12 +380,12 @@ impl BitSet {
     /// Counts into the set bits: the draw picks a position among the members
     /// and the words are walked until that many have been passed, so the cost
     /// is one step per word rather than one per member.
-    pub fn choose_member(&self, random: &mut Random) -> Option<usize> {
+    pub fn choose_member<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<usize> {
         if self.is_empty() {
             return None;
         }
 
-        let mut remaining: usize = random.uniform_index(self.members);
+        let mut remaining: usize = source.index_below(self.members);
 
         for (index, word) in self.words.iter().enumerate() {
             let held: usize = word.count_ones() as usize;

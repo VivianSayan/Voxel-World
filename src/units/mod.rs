@@ -34,6 +34,7 @@
 //!
 //! [`Seed`]: crate::random::seed::Seed
 
+pub mod frame;
 pub mod digest;
 pub mod identifier;
 pub mod rate;
@@ -50,7 +51,8 @@ pub mod weights;
 pub use crate::math::rational::Ratio;
 pub use digest::{Checksum, ContentHash};
 pub use identifier::{AnyId, Id, IdKind, tag_for_name};
-pub use time::{Seconds, Tick, TickDuration, TickRate};
+pub use frame::{Frame, FrameClock, FrameDelta, FrameIndex, TickAlpha};
+pub use time::{Seconds, Tick, TickDuration, TickRate, UpdateDelta};
 pub use rate::Rate;
 pub use scalar::{NoiseValue, Probability, UniformNoise, UniformProbability, UnitValue};
 pub use crate::math::{RatioOutOfRange, Unit};

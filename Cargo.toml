@@ -141,3 +141,35 @@ path = "testing/tests/seed_derivation.rs"
 [[test]]
 name = "fixed_trigonometry"
 path = "testing/tests/fixed_trigonometry.rs"
+
+[[test]]
+name = "fixed_extremes"
+path = "testing/tests/fixed_extremes.rs"
+
+[[test]]
+name = "decimal_literals"
+path = "testing/tests/decimal_literals.rs"
+
+[[test]]
+name = "fixed_sampling"
+path = "testing/tests/fixed_sampling.rs"
+
+[[test]]
+name = "shuffling"
+path = "testing/tests/shuffling.rs"
+
+[[test]]
+name = "bulk_pick"
+path = "testing/tests/bulk_pick.rs"
+
+[[test]]
+name = "tick_time"
+path = "testing/tests/tick_time.rs"
+
+[[test]]
+name = "frame_kinematics"
+path = "testing/tests/frame_kinematics.rs"
+
+[[test]]
+name = "tick_rota"
+path = "testing/tests/tick_rota.rs"

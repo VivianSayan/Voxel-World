@@ -5,14 +5,13 @@
 //! Index-based methods follow `BTreeMap`; reordering (`Reorder`) moves
 //! values between the occupied indices without changing them.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::sparse::sparse_core::{One, SparseCore};
 use crate::structures::sampling;
 use crate::structures::traits::sequence::is_window;
 use crate::structures::traits::{
     Choose, Collection, CollectionInsert, CollectionRemove, Element, RangeQuery, Reorder,
-    SparseIndexed,
-};
+    SparseIndexed, Shuffle};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::RangeBounds;
@@ -299,10 +298,6 @@ impl<T: Element> Reorder for SparseSequence<T> {
         self.core.reorder(|values| values.reverse());
     }
 
-    fn shuffle(&mut self, random: &mut Random) {
-        self.core
-            .reorder(|values| sampling::shuffle(values, random));
-    }
 }
 
 impl<T: Element> PartialEq for SparseSequence<T> {
@@ -386,5 +381,21 @@ impl<'a, T> IntoIterator for &'a SparseSequence<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+/// Reordered through the sparse core, which keeps each value's slot reachable.
+impl<T: Element> Shuffle for SparseSequence<T> {
+    fn shuffle<S: StochasticSource + ?Sized>(&mut self, source: &mut S) {
+        self.core.reorder(|values| sampling::shuffle(values, source));
+    }
+
+    fn partial_shuffle<S: StochasticSource + ?Sized>(&mut self, count: usize, source: &mut S) -> usize {
+        let mut filled: usize = 0;
+
+        self.core
+            .reorder(|values| filled = sampling::partial_shuffle(values, count, source));
+
+        filled
     }
 }

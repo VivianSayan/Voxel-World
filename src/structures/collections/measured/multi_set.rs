@@ -5,7 +5,7 @@
 //! Set algebra follows multiset rules: union keeps the larger count,
 //! intersection the smaller, difference subtracts. `+` adds counts.
 
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::collections::measured::tally::Tally;
 use crate::structures::hashing::unordered_hash;
 use crate::structures::traits::operators::impl_set_operators;
@@ -254,12 +254,12 @@ impl<T: Element> MeasuredMut for MultiSet<T> {
 
 /// Picks elements in proportion to their counts.
 impl<T: Element> Choose for MultiSet<T> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         let total = self.total_count();
         if total == 0 {
             return None;
         }
-        let mut target = random.uniform_index(total);
+        let mut target = source.index_below(total);
         for (item, count) in self.iter() {
             if target < count {
                 return Some(item);
@@ -269,20 +269,20 @@ impl<T: Element> Choose for MultiSet<T> {
         None
     }
 
-    fn choose_multiple(&self, random: &mut Random, amount: usize) -> Vec<&T> {
+    fn choose_multiple<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
         self.tally
-            .choose_weighted(random, amount, |count| count as f64, |_| {})
+            .choose_weighted(source, amount, |count| count as f64, |_| {})
     }
 }
 
 /// Weighted by count: an element held three times is three times as likely.
 impl<T: Element> WeightedChoose for MultiSet<T> {
-    fn choose_weighted(&self, random: &mut Random) -> Option<&T> {
-        self.choose(random)
+    fn choose_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.choose(source)
     }
 
-    fn choose_multiple_weighted(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        self.choose_multiple(random, amount)
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        self.choose_multiple(source, amount)
     }
 
     fn weighted_chance_of(&self, item: &T) -> Probability {

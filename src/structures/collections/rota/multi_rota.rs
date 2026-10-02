@@ -2,7 +2,7 @@
 //! no order kept inside a group.
 
 use super::balance::Balance;
-use crate::random::Random;
+use crate::random::source::StochasticSource;
 use crate::structures::hashing::FastHashMap;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{
@@ -309,12 +309,12 @@ impl<T: Element, const GROUPS: usize> CollectionRemove for MultiRota<T, GROUPS> 
 
 /// Uniform over the copies held, so a value with more copies is likelier.
 impl<T: Element, const GROUPS: usize> Choose for MultiRota<T, GROUPS> {
-    fn choose(&self, random: &mut Random) -> Option<&T> {
+    fn choose<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
         if self.is_empty() {
             return None;
         }
 
-        let mut remaining: usize = random.uniform_index(self.balance.len());
+        let mut remaining: usize = source.index_below(self.balance.len());
 
         for group in &self.groups {
             if remaining < group.len() {
@@ -431,12 +431,12 @@ impl<T: Element, const GROUPS: usize> MeasuredMut for MultiRota<T, GROUPS> {
 /// Weighted by how many copies a value has, which is what
 /// [`Choose`] already does here; this states it in the type.
 impl<T: Element, const GROUPS: usize> WeightedChoose for MultiRota<T, GROUPS> {
-    fn choose_weighted(&self, random: &mut Random) -> Option<&T> {
-        self.choose(random)
+    fn choose_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Option<&T> {
+        self.choose(source)
     }
 
-    fn choose_multiple_weighted(&self, random: &mut Random, amount: usize) -> Vec<&T> {
-        self.choose_multiple(random, amount)
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+        self.choose_multiple(source, amount)
     }
 
     fn weighted_chance_of(&self, item: &T) -> Probability {

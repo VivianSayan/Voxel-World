@@ -1,4 +1,4 @@
-//! Samplers, written once and usable from any [`RandomSource`].
+//! Samplers, written once and usable from any [`StochasticSource`].
 //!
 //! Each distribution is a small value: `new` checks its parameters once and
 //! [`Distribution::sample`] draws from it. The same value serves both kinds of
@@ -94,7 +94,7 @@ pub use tables::{Categorical, Dirichlet, IntegerCategorical, WeightedDiscrete};
 pub(super) use continuous::standard_normal;
 pub(super) use discrete::{geometric_one_in, geometric_ratio};
 
-use super::source::RandomSource;
+use super::source::StochasticSource;
 
 /// Something that can be sampled.
 pub trait Distribution {
@@ -102,7 +102,7 @@ pub trait Distribution {
 
     /// One draw. Consumes as many words from `source` as the algorithm needs,
     /// which for rejection samplers varies from call to call.
-    fn sample<S: RandomSource + ?Sized>(&self, source: &mut S) -> Self::Output;
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Self::Output;
 }
 
 /// A distribution whose draw is bit-for-bit portable across supported targets.
