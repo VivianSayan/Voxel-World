@@ -2,7 +2,7 @@
 
 use super::cadence::Cadence;
 use super::stochastic_scheduler::{CadenceId, Firing, StochasticScheduler};
-use crate::random::{StochasticStream, Seed, SeedCursor};
+use crate::random::{Seed, SeedCursor, StochasticStream};
 use crate::structures::hashing::FastHashMap;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{

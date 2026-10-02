@@ -24,7 +24,6 @@ pub mod spatial;
 pub mod structures;
 pub mod units;
 
-/// Time quantities. They live in [`units`] — time is a unit like any other — and
-/// are re-exported here because `voxel_world::time` is where callers look.
-pub use units::time;
+/// Time quantities, frame timing, and clocks.
+pub mod time;
 pub mod world;

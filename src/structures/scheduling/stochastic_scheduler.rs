@@ -2,7 +2,7 @@
 //! that no one step carries the crowd.
 
 use super::cadence::{Cadence, OnBacklog};
-use crate::random::{StochasticStream, Seed, SeedCursor, UniformU64};
+use crate::random::{Seed, SeedCursor, StochasticStream, UniformU64};
 use crate::structures::hashing::unordered_hash;
 use crate::structures::indices::Gate;
 use crate::structures::traits::{

@@ -197,12 +197,12 @@
 //!     velocity * delta             varies with the machine, and may not change the world
 //! ```
 //!
-//! [`Seconds`](crate::time::Seconds) sits under both as the general physical duration,
+//! [`Seconds`] sits under both as the general physical duration,
 //! and the operators accept it directly for anything that is neither — a timeout, an
 //! animation length, a measured interval.
 //!
 //! Both end in fixed-point seconds, and the operators accept either. The difference is
-//! **origin**: a [`Seconds`](crate::time::Seconds) derived from a
+//! **origin**: a [`Seconds`] derived from a
 //! [`TickRate`](crate::time::TickRate) is a fact about the simulation, where a
 //! [`FrameDelta`] is a fact about the hardware. Driving the world from the second would
 //! make its contents depend on the frame rate, and two players would diverge.

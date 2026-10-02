@@ -6,17 +6,17 @@
 //! [`distributions`] works with these sources through [`Random::sample`],
 //! [`Seed::sample`], or [`StochasticStream::draw`].
 
+pub mod approximation;
 pub mod bit_permuter;
 pub mod bulk_pick;
+pub mod distributions;
 pub mod fixed_point;
 mod generator;
-pub mod unit;
-mod questions;
-pub mod approximation;
-pub mod distributions;
 pub(crate) mod mixing;
+mod questions;
 pub mod seed;
 pub mod source;
+pub mod unit;
 
 pub use approximation::{
     Approximation, BinomialAlgorithm, HypergeometricAlgorithm, PoissonAlgorithm,
@@ -29,12 +29,9 @@ pub use bulk_pick::{
 pub use distributions::*;
 pub use fixed_point::{UniformFixed, UniformFixedRange};
 pub use seed::{
-    SEED_ALGORITHM_VERSION, Seed, SeedCursor, SeedDomain, SeedInteger, SeedablePosition,
-    domain_tag,
+    SEED_ALGORITHM_VERSION, Seed, SeedCursor, SeedDomain, SeedInteger, SeedablePosition, domain_tag,
 };
-pub use source::{StochasticStream, EventRandom, StochasticSource};
+pub use source::{EventRandom, StochasticSource, StochasticStream};
+pub use unit::{UniformNoise, UniformProbability, UniformUnit};
 
-
-pub use generator::{
-    RANDOM_ALGORITHM_VERSION, RANDOM_STATE_BYTES, Random, RandomState,
-};
+pub use generator::{RANDOM_ALGORITHM_VERSION, RANDOM_STATE_BYTES, Random, RandomState};

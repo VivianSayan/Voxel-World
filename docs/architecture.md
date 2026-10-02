@@ -8,15 +8,22 @@ unrelated code under `Misc`:
 | `math` | Vectors, matrices, arbitrary-width integers, rings and fields, validated rotations |
 | `random` | Streams, seed derivation, validated distributions |
 | `spatial` | Coordinates, octree levels, spatial noise |
-| `time` | Time points, durations, frequencies, tick scheduling |
+| `time` | Time points, durations, frame timing and clocks |
 | `units` | Probabilities, ratios, weights, identifiers and scalar constraints |
-| `structures` | Generic collections, indices, mappings and sampling |
+| `structures` | Generic collections, indices, mappings, scheduling and sampling |
 | `world` | Voxel registry, storage, chunk generation |
 
-`misc` retains compatibility re-exports, and `units` still re-exports spatial
-quantities and time measures. Prefer the domain modules in new code. The physical
-module directories are lowercase. The existing `engine` files remain placeholders;
-this refactor does not implement rendering, streaming or a full simulation engine.
+Use short public paths such as `math::Fixed`, `random::Seed`,
+`spatial::VoxelPosition3`, `time::FrameClock`, `units::Probability`, and
+`structures::OrderedSet`. Capability traits live under `structures::traits`;
+its `prelude` contains the commonly used ones. Public paths do not depend on
+which private source file implements a type.
+
+`structures::scheduling` holds deadline and stochastic schedulers, a typed tick
+scheduler, and balanced rotas. Their former collection paths remain available.
+The default `renderer` feature includes the Vulkan playground. A library-only
+build with `--no-default-features` requires neither graphics dependencies nor
+`glslc`.
 
 ## Type boundaries
 
@@ -77,8 +84,8 @@ contiguous pool for dense ones. Indexable collections pick a single index in O(1
 `Seed` is an immutable 128-bit identity and derivation key. A one-shot
 `Seed::sample` whitens the seed and is repeatable; it never masquerades as an
 advancing source. Use `SeedCursor` when a small owner needs successive draws,
-or `Random` for a full xoshiro256** stream. `RandomSource` is the sampler-facing
-word source, while `DrawSource` is the owner-facing trait for state that advances
+or `Random` for a full xoshiro256** stream. `StochasticSource` is the sampler-facing
+word source, while `StochasticStream` is the owner-facing trait for state that advances
 between calls. `PortableDistribution` lets persistent generation require a
 sampler whose implementation is bit-for-bit portable.
 

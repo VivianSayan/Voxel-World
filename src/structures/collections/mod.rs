@@ -3,23 +3,25 @@
 //! | Family      | Structures                                                   |
 //! |-------------|--------------------------------------------------------------|
 //! | `sets`      | `Set`, `NestedSet`, `BitSet`, `DisjointSets`, `LabelIndexedSet`, `SubscriptionSet` |
-//! | `sequences` | `OrderedSet`, `LabeledOrderedSet`, `PriorityQueue`, `BucketQueue`, `RingBuffer`, `RunLengthSequence`, `Scheduler` |
+//! | `sequences` | `OrderedSet`, `LabeledOrderedSet`, `PriorityQueue`, `BucketQueue`, `RingBuffer`, `RunLengthSequence` |
 //! | `standard`  | the traits above, on `Vec` and `VecDeque`                    |
 //! | `measured`  | `MultiSet`, `WeightedSet`, `FuzzySet`                        |
 //! | `sparse`    | `SparseSequence`, `SparseSetSequence`                        |
+//!
+//! [`crate::structures::scheduling`] holds schedulers and rotas. Their former
+//! paths in this module remain available for compatibility.
 //!
 //! `properties` is where the structures claim the traits that are promises
 //! rather than operations: reserving room, iterating in an order that replays,
 //! and hashing by contents.
 
 pub mod measured;
-pub mod properties;
-pub mod rota;
+pub use crate::structures::properties;
+pub use crate::structures::scheduling::rota;
 pub mod sequences;
 pub mod sets;
 pub mod sparse;
-mod tick_scheduler;
-pub use tick_scheduler::TickScheduler;
+pub use crate::structures::scheduling::TickScheduler;
 pub mod standard;
 
 pub use measured::{FuzzySet, MEMBERSHIP_TOLERANCE, MultiSet, WeightedSet};

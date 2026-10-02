@@ -2,16 +2,15 @@
 
 pub mod bounded_ordered_set;
 pub mod bucket_queue;
-pub mod cadence;
+pub use crate::structures::scheduling::cadence;
 pub mod labeled_ordered_set;
 pub mod ordered_set;
 pub mod priority_queue;
 pub mod ring_buffer;
 pub mod run_length;
-pub mod scheduler;
-pub mod stochastic_scheduler;
-pub mod unique_scheduler;
-pub mod unique_stochastic_scheduler;
+pub use crate::structures::scheduling::{
+    scheduler, stochastic_scheduler, unique_scheduler, unique_stochastic_scheduler,
+};
 
 pub use bounded_ordered_set::BoundedOrderedSet;
 pub use bucket_queue::BucketQueue;

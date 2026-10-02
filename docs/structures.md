@@ -11,21 +11,23 @@ invariant, or capability trait changes.
 
 ## Imports and terminology
 
-Most commonly used types and all capability traits are available through:
+Common structures and capability traits are available through:
 
 ```rust
 use voxel_world::structures::prelude::*;
 ```
 
-Some public types are reached through their family module and are not currently
-in the prelude—notably `BitSet`, `DisjointSets`, `BucketQueue`,
-`RunLengthSequence`, `IntervalMap`, `LruCache`, `Evicted`, and the hashing
-aliases. Examples in this document use family imports when that distinction
-matters:
+For application code, explicit short paths are often clearer:
 
 ```rust
-use voxel_world::structures::{collections::*, mappings::*, storage::*};
+use voxel_world::structures::{OrderedSet, PropertyQuery, SlotMap};
+use voxel_world::structures::traits::{Collection, Pending};
 ```
+
+Other public types remain available from their family module. Scheduling has a
+dedicated home under `structures::scheduling`; the former
+`collections::sequences` and `collections::rota` paths continue to work.
+The broad `structures::prelude` is convenient for experiments and examples.
 
 In this document:
 
@@ -651,11 +653,11 @@ reports how many occurrences it stands for, `FireAll` delivers one firing each,
 and `Cap(n)` delivers at most `n` now and keeps the rest owed so the backlog
 drains over the steps that follow.
 
-**Randomness.** `R` is where each entry draws from, and any `DrawSource` will
+**Randomness.** `R` is where each entry draws from, and any `StochasticStream` will
 do: a `SeedCursor`, which retains its 128-bit origin and current position and is
 replayable from the world seed; a `Random`, which is a xoshiro stream of its
 own; or `EventRandom` to mix the two within one scheduler. An immutable `Seed`
-is deliberately not a `DrawSource`: repeatedly sampling one is a repeatable
+is deliberately not a `StochasticStream`: repeatedly sampling one is a repeatable
 one-shot decision, not an advancing schedule. Entries that say nothing derive
 a seed from the scheduler's domain, the cadence, the value and a serial number,
 then turn it into the selected source, so the whole schedule is a function of
@@ -1721,7 +1723,7 @@ are trait methods, so import the prelude or the specific trait.
 | `check_kinds`, `KindContract` | Verifies a hand-written value type against the `Kinded` contract, and how it failed |
 | `PriorityQueueLike` | Common min-priority queue behavior |
 | `HandleStore` | Values owned behind opaque typed handles |
-| `DrawSource` (in `random`) | Owned randomness a structure can draw from and that advances itself |
+| `StochasticStream` (in `random`) | Owned randomness a structure can draw from and that advances itself |
 | `DeterministicOrder`, `DeterministicMapOrder` | Same operations replay within one format/executable version |
 | `CanonicalOrder`, `CanonicalMapOrder` | Iteration determined by logical contents alone |
 | `StableHash` | Architecture-independent stable identity for one value |

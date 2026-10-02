@@ -73,3 +73,14 @@ pub use sequence::{
 };
 pub use stable::{StableHash, stable_hash_ordered, stable_hash_unordered};
 pub use storage::HandleStore;
+
+/// Capability traits commonly needed when working with generic structures.
+///
+/// Import explicit traits when an algorithm uses only a few capabilities.
+pub mod prelude {
+    pub use super::{
+        Choose, ChooseMut, Collection, CollectionInsert, CollectionMut, CollectionRemove,
+        ContentHashable, Kinded, Map, MapMut, Measured, MeasuredMut, Pending, Reorder, Sequence,
+        SequenceMut, SetAlgebra, Shuffle, StableHash, WeightedChoose,
+    };
+}

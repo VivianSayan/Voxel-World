@@ -8,6 +8,7 @@ use crate::math::unit_interval::Unit;
 use crate::random::distributions::{Distribution, PortableDistribution};
 use crate::random::seed::Seed;
 use crate::random::source::StochasticSource;
+use crate::units::{NoiseValue, Probability};
 
 impl Unit {
     /// The fraction a seed stands for, in `[0, 1)`.
@@ -52,3 +53,51 @@ impl Distribution for UniformUnit {
 
 /// Integer-only, so the same seed gives the same draw on every target.
 impl PortableDistribution for UniformUnit {}
+
+// ---------------------------------------------------------------------------
+// Drawing these types
+// ---------------------------------------------------------------------------
+
+/// A uniformly random [`Probability`].
+///
+/// Half-open in `[0, 1)`, like every uniform draw here — a drawn chance is never
+/// exactly certain. Built from a [`Unit`] and converted, so it agrees bit for bit
+/// with [`UniformUnit`] on the same word, at the 53 bits
+/// an `f64` can hold.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UniformProbability;
+
+impl Distribution for UniformProbability {
+    type Output = Probability;
+
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> Probability {
+        source.unit().to_probability()
+    }
+}
+
+/// Integer-only, so the same seed gives the same draw on every target.
+impl PortableDistribution for UniformProbability {}
+
+/// A uniformly random [`NoiseValue`] in `[-1, 1)`.
+///
+/// Half-open at the top, inheriting the half-open unit draw it is stretched from.
+/// This is a *uniform* sample of the range, not a sample of any noise field: it is
+/// what to use for jitter, dithering and test data, not for terrain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UniformNoise;
+
+impl Distribution for UniformNoise {
+    type Output = NoiseValue;
+
+    fn sample<S: StochasticSource + ?Sized>(&self, source: &mut S) -> NoiseValue {
+        // `to_unit_value` cannot fail: the draw is half-open, so never one.
+        source
+            .unit()
+            .to_unit_value()
+            .expect("a uniform draw is below one")
+            .to_noise_value()
+    }
+}
+
+/// Integer-only, so the same seed gives the same draw on every target.
+impl PortableDistribution for UniformNoise {}

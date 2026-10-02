@@ -96,7 +96,7 @@ impl Ratio {
     ///
     /// # Why this one loses nothing
     ///
-    /// [`Fixed`](crate::math::Fixed) and [`Unit`](crate::math::Unit) have to round a
+    /// [`Fixed`] and [`Unit`](crate::math::Unit) have to round a
     /// decimal onto a binary grid, because `1/10` is not a dyadic rational. A
     /// [`Ratio`] has no such grid: `0.1` is stored as `1/10` and stays that way.
     /// Where a decimal constant has to be kept exactly, this is the type that can.

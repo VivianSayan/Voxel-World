@@ -1003,7 +1003,7 @@ impl std::error::Error for RatioOutOfRange {}
 ///
 /// The error is [`DecimalError`] rather than a type of its own, because every way the
 /// text can fail is already one of its cases — including
-/// [`DecimalError::NotAUnit`](crate::math::DecimalError::NotAUnit) for a value
+/// [`DecimalError::NotAUnit`] for a value
 /// outside `[0, 1]`.
 impl std::str::FromStr for Unit {
     type Err = DecimalError;

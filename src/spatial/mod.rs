@@ -8,11 +8,11 @@
 //! thrown away and generated again.
 
 pub mod depth;
+pub mod kinematics;
 pub mod measure;
 pub mod morton;
 pub mod noise;
 pub mod position;
-pub mod kinematics;
 pub mod precise;
 
 pub use depth::{Depth, TreeDepth};
@@ -26,3 +26,4 @@ pub use position::{
     LocalPosition2, LocalPosition3, LocalPosition4, NodePosition2, NodePosition3, NodePosition4,
     VoxelPosition2, VoxelPosition3, VoxelPosition4,
 };
+pub use precise::{PrecisePosition3, PreciseUnits};

@@ -10,8 +10,9 @@
 //! - `indices`: `TagIndex`, `PropertyQuery` and `ConditionIndex`.
 //! - `storage`: handle stores, compact sequences and checked dense grids.
 //!
-//! `use crate::structures::prelude::*;` brings every structure and
-//! trait into scope. Much of the shared behavior (set algebra, sorting,
+//! Import common structures directly from this module and capability traits
+//! from [`traits`]. The optional [`prelude`] gathers the most frequently used
+//! names. Much of the shared behavior (set algebra, sorting,
 //! random choice, grouping) lives only on the traits.
 //!
 //! Single-index keys need `Eq + Hash` (`Key`); structures that duplicate keys
@@ -25,27 +26,54 @@ pub mod name;
 pub use name::{Name, NameCollision};
 pub mod indices;
 pub mod mappings;
+pub mod properties;
 pub mod sampling;
+pub mod scheduling;
 pub mod storage;
 pub mod traits;
 
 pub(crate) mod buckets;
 
-/// Convenient re-exports of every public structure and capability trait.
+pub use collections::{
+    BitSet, BoundedOrderedSet, BucketQueue, Cadence, CadenceId, DisjointSets, Firing, FuzzySet,
+    KeyedOrderedSet, LabelIndexedSet, LabeledOrderedSet, MEMBERSHIP_TOLERANCE, MultiRota, MultiSet,
+    NestedSet, OnBacklog, OrderedMultiRota, OrderedRota, OrderedSet, PriorityQueue, RingBuffer,
+    Rota, RunLengthSequence, Scheduler, Set, SparseSequence, SparseSetSequence,
+    StochasticScheduler, SubscriptionSet, TickRota, TickRotaUpdate, TickScheduler, UniqueScheduler,
+    UniqueStochasticScheduler, WeightedSet, WorkQueue,
+};
+pub use hashing::{FastHashMap, FastHashSet};
+pub use indices::{
+    Cardinality, Comparability, Comparison, ConditionIndex, Expr, FuseError, FuseMode, Gate,
+    OnSatisfied, PropertyKind, PropertyQuery, PropertyStore, SchemaError, TagIndex, Uniqueness,
+};
+pub use mappings::{
+    BiMap, Evicted, GroupedMultiMap, GroupedSingleMap, IntervalMap, LabelMap, LayeredMap, LruCache,
+    ManyToManyMap, MultiMap, OneToManyMap, Overwritten, PairMap, PartitionMap, SetKeyMap,
+    UniqueMultiMap,
+};
+pub use storage::{
+    BitGrid, BitGrid2, BitGrid3, BitGrid4, CompactKind, CompactSequence, Grid, Grid2, Grid3, Grid4,
+    Palette, SlotMap,
+};
+
+/// Common structures and capability traits for exploratory code.
 ///
 /// Import this module with `use crate::structures::prelude::*;` when
-/// name collisions are not a concern.
+/// name collisions are not a concern. Use explicit imports from this module or
+/// its families for stable, readable production code.
 pub mod prelude {
     pub use super::collections::{
         BoundedOrderedSet, Cadence, CadenceId, Firing, FuzzySet, KeyedOrderedSet, LabelIndexedSet,
         LabeledOrderedSet, MEMBERSHIP_TOLERANCE, MultiRota, MultiSet, NestedSet, OnBacklog,
         OrderedMultiRota, OrderedRota, OrderedSet, PriorityQueue, RingBuffer, Rota, Scheduler, Set,
-        SparseSequence, SparseSetSequence, StochasticScheduler, SubscriptionSet, UniqueScheduler,
-        UniqueStochasticScheduler, WeightedSet, WorkQueue,
+        SparseSequence, SparseSetSequence, StochasticScheduler, SubscriptionSet, TickRota,
+        TickRotaUpdate, TickScheduler, UniqueScheduler, UniqueStochasticScheduler, WeightedSet,
+        WorkQueue,
     };
     pub use super::indices::{
-        Cardinality, Comparability, Comparison, ConditionIndex, Expr, FuseError, FuseMode,
-        OnSatisfied, PropertyKind, PropertyQuery, SchemaError, TagIndex, Uniqueness,
+        Cardinality, Comparability, Comparison, ConditionIndex, Expr, FuseError, FuseMode, Gate,
+        OnSatisfied, PropertyKind, PropertyQuery, PropertyStore, SchemaError, TagIndex, Uniqueness,
     };
     pub use super::mappings::{
         BiMap, GroupedMultiMap, GroupedSingleMap, LabelMap, ManyToManyMap, MultiMap, OneToManyMap,
@@ -59,9 +87,10 @@ pub mod prelude {
         BalancedPartition, Bounded, CanonicalMapOrder, CanonicalOrder, Capacity, Choose,
         ChooseByMeasure, ChooseMut, Collection, CollectionInsert, CollectionMut, CollectionRemove,
         ContentHashable, DeterministicMapOrder, DeterministicOrder, Element, EvictingInsert,
-        FixedCapacity, GroupSizes, Grouping, HandleStore, InsertAt, Key, Map, MapMut, Measured,
-        MeasuredMut, Partitioned, PriorityQueueLike, RangeQuery, Reorder, Sequence, SequenceMut, Shuffle,
-        SetAlgebra, SharedValueMap, SparseIndexed, StableHash, UniqueCollection, UniqueValueMap,
-        ValueCollection, ValueIndexed, ValueIndexedMut, ValueSetAlgebra, WeightedChoose,
+        FixedCapacity, GroupSizes, Grouping, HandleStore, InsertAt, Key, Kinded, Map, MapMut,
+        Measured, MeasuredMut, Partitioned, Pending, PriorityQueueLike, RangeQuery, Reorder,
+        Sequence, SequenceMut, SetAlgebra, SharedValueMap, Shuffle, SparseIndexed, StableHash,
+        UniqueCollection, UniqueValueMap, ValueCollection, ValueIndexed, ValueIndexedMut,
+        ValueSetAlgebra, WeightedChoose,
     };
 }

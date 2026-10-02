@@ -414,7 +414,11 @@ impl<T: Element, const GROUPS: usize> WeightedChoose for OrderedMultiRota<T, GRO
         self.choose(source)
     }
 
-    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(&self, source: &mut S, amount: usize) -> Vec<&T> {
+    fn choose_multiple_weighted<S: StochasticSource + ?Sized>(
+        &self,
+        source: &mut S,
+        amount: usize,
+    ) -> Vec<&T> {
         self.choose_multiple(source, amount)
     }
 

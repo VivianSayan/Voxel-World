@@ -6,6 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    // Library-only builds can opt out of Vulkan, windowing and shader tools.
+    if std::env::var_os("CARGO_FEATURE_RENDERER").is_none() {
+        return;
+    }
+
     let out: PathBuf = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
 
     for shader in ["triangle.vert", "triangle.frag"] {

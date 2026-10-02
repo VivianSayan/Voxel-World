@@ -137,6 +137,10 @@ layout, type-safety changes, determinism limits, tests and sampling benchmarks.
 See the [structure reference](docs/structures.md) for a problem-oriented guide
 to every reusable collection, mapping, index and storage structure.
 
+The default build includes the Vulkan playground. For a library-only build
+without Vulkan, windowing dependencies or `glslc`, use
+`cargo test --lib --no-default-features`.
+
 ## Contributing
 
 Contributions, ideas, testing, and discussion are welcome.

@@ -34,8 +34,8 @@
 //!
 //! [`Seed`]: crate::random::seed::Seed
 
-pub mod frame;
 pub mod digest;
+pub mod frame;
 pub mod identifier;
 pub mod rate;
 pub mod scalar;
@@ -49,12 +49,12 @@ pub mod weights;
 // depend on `spatial` while `spatial` depended back on `units` — a cycle that
 // bought nothing but a shorter import. Reach for `crate::spatial` directly.
 pub use crate::math::rational::Ratio;
-pub use digest::{Checksum, ContentHash};
-pub use identifier::{AnyId, Id, IdKind, tag_for_name};
-pub use frame::{Frame, FrameClock, FrameDelta, FrameIndex, TickAlpha};
-pub use time::{Seconds, Tick, TickDuration, TickRate, UpdateDelta};
-pub use rate::Rate;
-pub use scalar::{NoiseValue, Probability, UniformNoise, UniformProbability, UnitValue};
 pub use crate::math::{RatioOutOfRange, Unit};
-pub use crate::random::unit::UniformUnit;
+pub use crate::random::unit::{UniformNoise, UniformProbability, UniformUnit};
+pub use digest::{Checksum, ContentHash};
+pub use frame::{DeltaOutOfRange, Frame, FrameClock, FrameDelta, FrameIndex, TickAlpha};
+pub use identifier::{AnyId, Id, IdKind, tag_for_name};
+pub use rate::Rate;
+pub use scalar::{NoiseValue, Probability, UnitValue};
+pub use time::{Seconds, Tick, TickDuration, TickRate, UpdateDelta};
 pub use weights::Weights;

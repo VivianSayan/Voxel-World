@@ -3,7 +3,7 @@
 //! # Any source, not just a stream
 //!
 //! Each of these takes anything implementing
-//! [`StochasticSource`](crate::random::StochasticSource), so the same helper serves a
+//! [`StochasticSource`], so the same helper serves a
 //! [`Random`](crate::random::Random) stream and a
 //! [`Seed`](crate::random::seed::Seed)'s cursor alike. They were written for `Random`
 //! alone, which meant a seed — the thing a world uses to get the *same* answer every
